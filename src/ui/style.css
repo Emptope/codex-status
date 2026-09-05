@@ -101,6 +101,13 @@ main {
   background: var(--surface);
 }
 
+main.panel {
+  display: flex;
+  height: min(480px, 100vh);
+  flex-direction: column;
+  overflow: hidden;
+}
+
 header,
 .collapsed-row,
 .session-heading,
@@ -332,6 +339,22 @@ footer {
   scrollbar-gutter: stable;
   padding: 0 2px 6px;
   cursor: auto;
+}
+
+.panel .scroll-view {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+}
+
+.panel > header,
+.panel > .session-heading,
+.panel > .quota-summary,
+.panel > .empty-quota,
+.panel > footer,
+.panel > .error,
+.panel > .view-title {
+  flex-shrink: 0;
 }
 
 h2 {

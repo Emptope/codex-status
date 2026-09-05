@@ -77,19 +77,21 @@
   function dragCard(event: PointerEvent) {
     if (shouldDrag(event)) void drag();
   }
+  function fitCard(collapsed = settings.collapsed, currentView = view) {
+    if (!content) return;
+    const panel = !collapsed && currentView !== 'summary';
+    void fit(
+      collapsed ? 240 : panel ? 360 : 300,
+      panel ? 480 : Math.max(40, Math.ceil(content.scrollHeight)),
+    ).catch(() => {});
+  }
   onMount(() => {
     let dispose = () => {};
     let stopped = false;
     const timer = setInterval(() => {
       now = Date.now();
     }, 1000);
-    const observer = new ResizeObserver(() => {
-      if (content)
-        void fit(
-          settings.collapsed ? 240 : view === 'summary' ? 300 : 360,
-          Math.max(40, Math.ceil(content.scrollHeight)),
-        ).catch(() => {});
-    });
+    const observer = new ResizeObserver(() => fitCard());
     observer.observe(content);
     void (async () => {
       dispose = await subscribe(
@@ -125,9 +127,17 @@
     document.documentElement.dataset.theme = settings.theme;
     document.documentElement.style.fontSize = `${settings.fontSize}px`;
   });
+  $effect(() => {
+    fitCard(settings.collapsed, view);
+  });
 </script>
 
-<main bind:this={content} class:collapsed={settings.collapsed} onpointerdown={dragCard}>
+<main
+  bind:this={content}
+  class:collapsed={settings.collapsed}
+  class:panel={!settings.collapsed && view !== 'summary'}
+  onpointerdown={dragCard}
+>
   {#if settings.collapsed}
     <div class="collapsed-row">
       <span class="status-icon" data-status={status}><Activity size={16} /></span>

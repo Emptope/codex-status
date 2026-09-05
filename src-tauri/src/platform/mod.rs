@@ -60,11 +60,12 @@ fn resize(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), String> 
             .current_monitor()
             .ok()
             .flatten()
-            .map(|m| m.size().height as f64 / m.scale_factor() * 0.7)
+            .map(|m| m.work_area().size.height as f64 / m.scale_factor() * 0.7)
             .unwrap_or(600.0);
         window
             .set_size(tauri::LogicalSize::new(width, height.min(limit)))
             .map_err(|_| "window-update-failed")?;
+        ensure_visible(&window).map_err(|_| "window-update-failed")?;
     }
     Ok(())
 }
@@ -116,13 +117,22 @@ fn clamp(
                 && i64::from(desired.y) < end_y
         })
         .or_else(|| monitors.first())?;
-    let start = monitor.position();
-    let max_x = i64::from(start.x) + i64::from(monitor.size().width.saturating_sub(size.width));
-    let max_y = i64::from(start.y) + i64::from(monitor.size().height.saturating_sub(size.height));
-    Some(PhysicalPosition::new(
+    let area = monitor.work_area();
+    Some(clamp_to_area(desired, size, area.position, area.size))
+}
+
+fn clamp_to_area(
+    desired: PhysicalPosition<i32>,
+    size: PhysicalSize<u32>,
+    start: PhysicalPosition<i32>,
+    available: PhysicalSize<u32>,
+) -> PhysicalPosition<i32> {
+    let max_x = i64::from(start.x) + i64::from(available.width.saturating_sub(size.width));
+    let max_y = i64::from(start.y) + i64::from(available.height.saturating_sub(size.height));
+    PhysicalPosition::new(
         i64::from(desired.x).clamp(i64::from(start.x), max_x.max(i64::from(start.x))) as i32,
         i64::from(desired.y).clamp(i64::from(start.y), max_y.max(i64::from(start.y))) as i32,
-    ))
+    )
 }
 
 fn ensure_visible(window: &tauri::WebviewWindow) -> tauri::Result<()> {
@@ -304,6 +314,15 @@ mod tests {
                 &monitors
             ),
             None
+        );
+        assert_eq!(
+            clamp_to_area(
+                PhysicalPosition::new(1_900, 1_000),
+                PhysicalSize::new(540, 720),
+                PhysicalPosition::new(0, 0),
+                PhysicalSize::new(2_560, 1_400),
+            ),
+            PhysicalPosition::new(1_900, 680),
         );
     }
 }

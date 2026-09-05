@@ -108,6 +108,59 @@ test('collapsed mode has stable controls and no horizontal overflow', async ({ p
   expect(overflow).toBeLessThanOrEqual(0);
 });
 
+test('session history stays compact and scrolls inside the card', async ({ page }, testInfo) => {
+  await page.unroute('**/api/**');
+  await mock(page);
+  await page.route('**/api/preferences', (route) =>
+    route.fulfill({ json: { ...settings, fontSize: 15 } }),
+  );
+  await page.route('**/api/snapshot', (route) =>
+    route.fulfill({
+      json: {
+        ...snapshot,
+        revision: 5,
+        sessions: Array.from({ length: 16 }, (_, index) => ({
+          ...snapshot.sessions[0],
+          id: `root:session-${index}`,
+          project: `project-${index}`,
+          path: `/workspace/project-${index}`,
+          latestAt: now - index * 60_000,
+        })),
+      },
+    }),
+  );
+  await page.setViewportSize({ width: 360, height: 504 });
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: 'Session list' }).click();
+
+  const layout = await page.evaluate(() => ({
+    cardHeight: document.querySelector('main')!.getBoundingClientRect().height,
+    pageOverflow: document.documentElement.scrollHeight - innerHeight,
+    listOverflow:
+      document.querySelector('.scroll-view')!.scrollHeight -
+      document.querySelector('.scroll-view')!.clientHeight,
+  }));
+  expect(layout.cardHeight).toBeLessThanOrEqual(480);
+  expect(layout.pageOverflow).toBeLessThanOrEqual(0);
+  expect(layout.listOverflow).toBeGreaterThan(0);
+  await page.screenshot({
+    path: `build/screenshots/sessions-${testInfo.project.name}.png`,
+    fullPage: true,
+  });
+
+  await page.setViewportSize({ width: 360, height: 320 });
+  const compact = await page.evaluate(() => ({
+    cardHeight: document.querySelector('main')!.getBoundingClientRect().height,
+    pageOverflow: document.documentElement.scrollHeight - innerHeight,
+    listOverflow:
+      document.querySelector('.scroll-view')!.scrollHeight -
+      document.querySelector('.scroll-view')!.clientHeight,
+  }));
+  expect(compact.cardHeight).toBeLessThanOrEqual(320);
+  expect(compact.pageOverflow).toBeLessThanOrEqual(0);
+  expect(compact.listOverflow).toBeGreaterThan(0);
+});
+
 test('large text, themes and degraded states remain readable', async ({ page }, testInfo) => {
   await page.getByRole('button', { name: 'Settings' }).click();
   await page.getByLabel('Font size').fill('18');
