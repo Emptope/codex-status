@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { countdown, duration, number, percent, time } from '../../src/state/format';
+import {
+  connectionLabel,
+  countdown,
+  duration,
+  number,
+  percent,
+  time,
+} from '../../src/state/format';
 
 describe('status formatting', () => {
   it('keeps missing and zero values distinct', () => {
@@ -18,5 +25,11 @@ describe('status formatting', () => {
     expect(countdown(now + 61 * 60_000, now)).toBe('1h 1m');
     expect(time(null)).toBe('Unknown');
     expect(time(0)).not.toBe('Unknown');
+  });
+
+  it('shows a verified external provider name', () => {
+    expect(connectionLabel('externalProvider', 'Work gateway')).toBe('Work gateway');
+    expect(connectionLabel('externalProvider', null)).toBe('External provider');
+    expect(connectionLabel('connected', 'Work gateway')).toBe('Connected');
   });
 });

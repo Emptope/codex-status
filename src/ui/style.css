@@ -349,10 +349,13 @@ footer {
   display: flex;
   align-items: center;
   gap: 5px;
+  min-width: 0;
+  max-width: 55%;
 }
 
 .connection:before {
   content: '';
+  flex: 0 0 auto;
   width: 5px;
   height: 5px;
   background: var(--green);

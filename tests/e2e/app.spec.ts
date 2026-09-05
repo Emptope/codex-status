@@ -43,6 +43,7 @@ const snapshot = {
   ],
   connection: 'connected',
   account: 'chatgpt',
+  provider: null,
   version: '0.153.4',
   updatedAt: now,
   error: null,
@@ -199,4 +200,29 @@ test('large text, themes and degraded states remain readable', async ({ page }, 
   await expect(page.locator('footer').getByText('Offline')).toBeVisible();
   await page.getByRole('button', { name: /a-project-with/ }).click();
   await expect(page.getByText('Refresh timed out')).toBeVisible();
+});
+
+test('external provider uses its configured name', async ({ page }) => {
+  const provider = `provider-${'x'.repeat(119)}`;
+  await page.unroute('**/api/**');
+  await mock(page);
+  await page.route('**/api/snapshot', (route) =>
+    route.fulfill({
+      json: {
+        ...snapshot,
+        revision: 5,
+        quotas: [],
+        account: 'externalProvider',
+        connection: 'externalProvider',
+        provider,
+      },
+    }),
+  );
+  await page.reload({ waitUntil: 'networkidle' });
+
+  const label = page.locator('footer .connection');
+  await expect(label).toHaveAttribute('title', provider);
+  await expect(label.getByText(provider, { exact: true })).toBeVisible();
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
 });

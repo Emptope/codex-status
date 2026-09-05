@@ -56,6 +56,7 @@ export interface Snapshot {
   quotas: Quota[];
   connection: string;
   account: string;
+  provider: string | null;
   version: string | null;
   updatedAt: number | null;
   error: string | null;
@@ -84,6 +85,7 @@ export const empty: Snapshot = {
   quotas: [],
   connection: 'connecting',
   account: 'unknown',
+  provider: null,
   version: null,
   updatedAt: null,
   error: null,

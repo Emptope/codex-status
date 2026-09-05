@@ -26,6 +26,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io
 notify = "8"
 walkdir = "2"
 tempfile = "3"
+toml = "0.9"
 tauri = { version = "2", optional = true, features = ["tray-icon"] }
 tauri-plugin-notification = { version = "2", optional = true }
 

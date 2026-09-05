@@ -22,6 +22,9 @@ export const connection: Record<string, string> = {
   chatgpt: 'ChatGPT',
   unknown: 'Unknown',
 };
+export function connectionLabel(value: string, provider: string | null): string {
+  return value === 'externalProvider' && provider ? provider : connection[value] || 'Unknown';
+}
 export const error: Record<string, string> = {
   'auth-required': 'Sign in required',
   'query-failed': 'Could not refresh',

@@ -16,7 +16,7 @@
     BellOff,
   } from '@lucide/svelte';
   import { empty, defaults, type Snapshot, type Settings } from '../types/status';
-  import { activity, connection, percent } from '../state/format';
+  import { activity, connectionLabel, percent } from '../state/format';
   import { command, drag, fit, resizeHeight, save, subscribe } from '../state/bridge';
   import Quota from './Quota.svelte';
   import Details from './Details.svelte';
@@ -41,6 +41,7 @@
       (snapshot.quotas.length === 1 ? snapshot.quotas[0] : undefined),
   );
   const status = $derived(session?.activity.value || 'unknown');
+  const connectionName = $derived(connectionLabel(snapshot.connection, snapshot.provider));
 
   async function accept(next: Snapshot) {
     if (next.revision <= snapshot.revision) return;
@@ -242,7 +243,7 @@
         >{#each snapshot.quotas as item}<option value={item.id}>{item.name}</option>{/each}</select
       >
     {:else}<div class="empty-quota">
-        {connection[snapshot.connection] || 'Quota unavailable'}
+        <span class="truncate" title={connectionName}>{connectionName}</span>
       </div>{/if}
     <footer>
       <button
@@ -252,8 +253,10 @@
         onclick={() => {
           showView(view === 'sessions' ? 'summary' : 'sessions');
         }}><Users size={14} /><span>{snapshot.sessions.length} sessions</span></button
-      ><span class="connection" class:warning={snapshot.connection !== 'connected'}
-        >{connection[snapshot.connection] || 'Unknown'}</span
+      ><span
+        class="connection"
+        class:warning={snapshot.connection !== 'connected'}
+        title={connectionName}><span class="truncate">{connectionName}</span></span
       >
     </footer>
     {#if error}<p class="error" role="alert">{error}</p>{/if}

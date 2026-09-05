@@ -15,6 +15,7 @@ export function preview() {
         quotas: [],
         connection: 'connecting',
         account: 'unknown',
+        provider: null,
         version: null,
         updatedAt: null,
         error: null,

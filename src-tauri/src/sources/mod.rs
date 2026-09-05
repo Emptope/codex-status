@@ -1,3 +1,4 @@
+mod config;
 mod executable;
 mod local;
 mod rpc;
@@ -262,6 +263,7 @@ impl Runtime {
                     state.version = version.clone();
                     state.quotas.clear();
                     state.account = "unknown".into();
+                    state.provider = None;
                 });
                 configuration = Some(signature);
                 failures = 0;
@@ -302,8 +304,12 @@ impl Runtime {
                     let account = rpc.call("account/read").await?;
                     let mode = account_mode(&account);
                     let quota_source = quota_source(mode);
+                    let provider = (mode == "externalProvider")
+                        .then(|| config::provider(settings.roots.first().map(String::as_str)))
+                        .flatten();
                     self.publish(|state| {
                         state.account = mode.into();
+                        state.provider = provider;
                     });
                     if quota_source != QuotaSource::Rpc {
                         self.publish(|state| {

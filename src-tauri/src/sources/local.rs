@@ -364,7 +364,16 @@ impl Local {
     }
 
     pub fn snapshot(&self) -> Vec<Session> {
-        let mut sessions: Vec<_> = self.sessions.values().cloned().collect();
+        let mut sessions: Vec<_> = self
+            .sessions
+            .values()
+            .filter(|session| {
+                let path = Path::new(&session.path);
+                // Paths owned by another configured runtime cannot be verified on this host.
+                !path.is_absolute() || path.is_dir()
+            })
+            .cloned()
+            .collect();
         sessions.sort_by(|a, b| b.latest_at.cmp(&a.latest_at).then_with(|| a.id.cmp(&b.id)));
         sessions.truncate(50);
         sessions
@@ -427,10 +436,18 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let first = directory.path().join("first");
         let second = directory.path().join("second");
+        let one = directory.path().join("work/one");
+        let two = directory.path().join("work/two");
+        fs::create_dir_all(&one).unwrap();
+        fs::create_dir_all(&two).unwrap();
         let meta = |path: &str| json!({"type":"session_meta","payload":{"id":"same","cwd":path,"cli_version":"0.153.4","instructions":"private"}});
         let unknown = json!({"timestamp":"2026-09-05T00:00:01Z","type":"event_msg","payload":{"type":"unverified_status","status":"failed"}});
-        fs::write(&first, format!("{}\n{}\n", meta("/work/one"), unknown)).unwrap();
-        fs::write(&second, format!("{}\n", meta("/work/two"))).unwrap();
+        fs::write(
+            &first,
+            format!("{}\n{}\n", meta(&one.to_string_lossy()), unknown),
+        )
+        .unwrap();
+        fs::write(&second, format!("{}\n", meta(&two.to_string_lossy()))).unwrap();
         let mut local = Local::default();
         local.update(&first, "/data/first");
         local.update(&second, "/data/second");
@@ -447,6 +464,35 @@ mod tests {
                 .unwrap()
                 .contains("private")
         );
+    }
+
+    #[test]
+    fn snapshot_excludes_missing_local_working_directories() {
+        let root = tempfile::tempdir().unwrap();
+        let records = root.path().join("sessions");
+        let available = root.path().join("available");
+        let missing = root.path().join("missing");
+        fs::create_dir(&records).unwrap();
+        fs::create_dir(&available).unwrap();
+        let meta = |id: &str, path: &Path| json!({"type":"session_meta","payload":{"id":id,"cwd":path,"cli_version":"0.153.4"}});
+        let available_record = records.join("available.jsonl");
+        let missing_record = records.join("missing.jsonl");
+        fs::write(
+            &available_record,
+            format!("{}\n", meta("available", &available)),
+        )
+        .unwrap();
+        fs::write(&missing_record, format!("{}\n", meta("missing", &missing))).unwrap();
+
+        let mut local = Local::default();
+        let root = root.path().to_string_lossy();
+        local.update(&available_record, &root);
+        local.update(&missing_record, &root);
+        assert_eq!(local.snapshot().len(), 1);
+        assert_eq!(local.snapshot()[0].path, available.to_string_lossy());
+
+        fs::remove_dir(available).unwrap();
+        assert!(local.snapshot().is_empty());
     }
 
     #[test]
