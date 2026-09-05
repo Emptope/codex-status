@@ -1,0 +1,44 @@
+# Dependencies and caches
+node_modules/
+.pnpm-store/
+.vite/
+.vite-temp/
+
+# Build output
+/build/
+/dist/
+/target/
+/src-tauri/target/
+/src-tauri/gen/schemas/
+*.tsbuildinfo
+
+# Test output
+/coverage/
+/playwright-report/
+/playwright/.cache/
+/test-results/
+
+# Local environment
+.env
+.env.*
+!.env.example
+!.env.*.example
+!.env.sample
+!.env.template
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Editor temporary files
+*.swp
+*.swo
+*~
+.idea/
+
+# System metadata
+.DS_Store
+._*
+Thumbs.db
+Desktop.ini
