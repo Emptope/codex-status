@@ -1,0 +1,14 @@
+{
+  "version": "0.153.4",
+  "files": {
+    "v1/InitializeParams.json": "6f0094be9a65242ec779a40794cbd4fdfa32fca1e45084a16adfb50501d33ea2",
+    "v1/InitializeResponse.json": "62ad689c2cb6379913c1d72749cfd8de5089d35760214123518eb92eef11acc9",
+    "v2/GetAccountParams.json": "30b545275f60975b55bd6fbaafd70f15505801d14168ee82d3931b6e93c78aab",
+    "v2/GetAccountResponse.json": "08a7dd8c570c905b0bb6998d43ed133e72e2445f08125f86dfc96887e288701a",
+    "v2/GetAccountRateLimitsResponse.json": "a28d4d0e9181a498c58d4ae3b6b49aaa6ee7a33c0c9f81c1ad0bff223bfbbe3b",
+    "v2/ThreadListParams.json": "b227bb78acf9b91060d03c56d3f2072cdd9f1bd08290c11e8869f1a663b16da2",
+    "v2/ThreadReadParams.json": "dfe040c6ac71d30795b8be3f3ff232e66f362a37f883b491e5d1ea367f470db4",
+    "v2/ThreadStatusChangedNotification.json": "26f3c60c1b73f7fa2d31c74429cdc36f8746c76c33e3d314b3fb61d3661f05f6",
+    "v2/ThreadTokenUsageUpdatedNotification.json": "aba4f6c7e4a19b2b842c08ee793b57000c07dafd57b922ad0d8e7c76609108c2"
+  }
+}

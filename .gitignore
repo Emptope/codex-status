@@ -10,6 +10,7 @@ node_modules/
 /target/
 /src-tauri/target/
 /src-tauri/gen/schemas/
+.build.lock
 *.tsbuildinfo
 
 # Test output

@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "Status window events and drag gestures",
+  "windows": ["main"],
+  "permissions": ["core:event:default", "core:window:allow-start-dragging"]
+}
