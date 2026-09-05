@@ -4,7 +4,7 @@
 
 ## 当前结果
 
-Rust、Tauri 2、Svelte 5 工程和统一任务入口已经可运行。每个入口清理 `build` 内的页面、单文件发行产物、截图、测试结果和遗留安装包，并保留 `build/cargo/<platform>-<arch>` 与 `build/vite-cache` 增量缓存；Vite 不监听生成目录。`pnpm build` 只输出 `build/release/codex-status-<platform>-<arch>` 可执行文件，不生成安装器或应用包。应用和托盘使用统一生成的 `>_<` 平面图标。构建锁会拒绝并发任务，Windows 入口先加载 Visual Studio 开发环境。格式、类型、Clippy、Rust 测试、Node.js 测试、前端测试及 Playwright 页面测试已纳入同一个验证命令。
+Rust、Tauri 2、Svelte 5 工程和统一任务入口已经可运行。每个入口清理 `build` 内的页面、单文件发行产物、截图、测试结果和遗留安装包，并保留 `build/cargo/<platform>-<arch>` 与 `build/vite-cache` 增量缓存；Vite 不监听生成目录。`pnpm build` 按宿主输出一个单文件到 `build/artifacts/<platform>/<arch>/codex-status[.exe]`，其中平台目录为 `windows`、`linux` 或 `macos`，不生成安装器或应用包；Cargo 固定生成的 `build/cargo/<platform>-<arch>/release` 仅是编译缓存。应用和托盘使用统一生成的 `>_<` 平面图标。构建锁会拒绝并发任务，Windows 入口先加载 Visual Studio 开发环境。格式、类型、Clippy、Rust 测试、Node.js 测试、前端测试及 Playwright 页面测试已纳入同一个验证命令。
 
 Cargo 的可复用 target 缓存保持在项目内的 `build/cargo/<platform>-<arch>`，没有移动到 WSL 文件系统或项目外，也不会在 Windows 与 WSL 间混用。`/mnt/*` 挂载会把 Cargo 主动设置的指纹时间截为整秒，却保留自然写入文件的纳秒，导致生成文件被误判为构建后变化；统一入口会在编译成功、失败或中断后归一化 Cargo 生成目录的时间，不改源码、不删缓存。实测同一测试命令由错误重编译时的 78 秒降至缓存命中时约 9 秒，第三方依赖不再重复编译。需要主动排除缓存影响时才显式执行 `pnpm clean:cache`。
 

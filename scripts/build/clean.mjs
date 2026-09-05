@@ -32,7 +32,7 @@ export async function cleanBuild() {
     throw new Error('Unsafe build directory');
   }
   await mkdir(directory, { recursive: true });
-  for (const name of ['web', 'release', 'screenshots', 'test-results']) {
+  for (const name of ['web', 'artifacts', 'release', 'screenshots', 'test-results']) {
     await removeDirectory(join(directory, name), 'Unsafe build output');
   }
   const cargo = join(directory, 'cargo');

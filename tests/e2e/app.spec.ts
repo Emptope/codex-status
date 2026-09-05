@@ -94,6 +94,13 @@ test('summary, details, sessions and settings remain operable', async ({ page })
   await expect(page.getByLabel('Theme')).toBeVisible();
 });
 
+test('the card surface is draggable without a dedicated control or cursor override', async ({
+  page,
+}) => {
+  await expect(page.getByRole('button', { name: 'Move window' })).toHaveCount(0);
+  await expect(page.locator('main')).toHaveCSS('cursor', 'auto');
+});
+
 test('collapsed mode has stable controls and no horizontal overflow', async ({ page }) => {
   await page.getByRole('button', { name: 'Collapse' }).click();
   await expect(page.getByRole('button', { name: 'Expand' })).toBeVisible();

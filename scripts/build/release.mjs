@@ -5,8 +5,21 @@ export function executableName(name, platform = process.platform) {
   return `${name}${platform === 'win32' ? '.exe' : ''}`;
 }
 
-export function artifactName(name, platform = process.platform, arch = process.arch) {
-  return `${name}-${platform}-${arch}${platform === 'win32' ? '.exe' : ''}`;
+function platformName(platform) {
+  if (platform === 'win32') return 'windows';
+  if (platform === 'darwin') return 'macos';
+  return platform;
+}
+
+export function artifactPath(root, name, platform = process.platform, arch = process.arch) {
+  return join(
+    root,
+    'build',
+    'artifacts',
+    platformName(platform),
+    arch,
+    executableName(name, platform),
+  );
 }
 
 export async function packageName(root) {
@@ -26,7 +39,7 @@ export async function stageExecutable(
   const source = join(target, 'release', executableName(name, platform));
   const sourceInfo = await stat(source);
   if (!sourceInfo.isFile()) throw new Error('Release executable is missing');
-  const destination = join(root, 'build', 'release', artifactName(name, platform, arch));
+  const destination = artifactPath(root, name, platform, arch);
   await mkdir(dirname(destination), { recursive: true });
   await copyFile(source, destination);
   await chmod(destination, sourceInfo.mode);

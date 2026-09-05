@@ -148,12 +148,6 @@ header {
   color: var(--green);
 }
 
-.drag {
-  cursor: grab;
-  margin-left: -6px;
-  color: var(--muted);
-}
-
 .session-heading {
   margin: 5px 0;
 }
@@ -337,6 +331,7 @@ footer {
   overflow-x: hidden;
   scrollbar-gutter: stable;
   padding: 0 2px 6px;
+  cursor: auto;
 }
 
 h2 {
@@ -520,10 +515,6 @@ textarea {
 
 .collapsed-row .numeric {
   white-space: nowrap;
-}
-
-.collapsed-row .drag {
-  margin-left: 0;
 }
 
 .spinning svg {

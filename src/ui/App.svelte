@@ -7,7 +7,6 @@
     CircleCheck,
     CircleHelp,
     Clock,
-    GripVertical,
     Pin,
     PinOff,
     RefreshCw,
@@ -22,6 +21,7 @@
   import Quota from './Quota.svelte';
   import Details from './Details.svelte';
   import Preferences from './Settings.svelte';
+  import { shouldDrag } from './drag';
 
   let snapshot = $state<Snapshot>(empty);
   let settings = $state<Settings>(defaults);
@@ -74,6 +74,9 @@
       refreshing = false;
     }
   }
+  function dragCard(event: PointerEvent) {
+    if (shouldDrag(event)) void drag();
+  }
   onMount(() => {
     let dispose = () => {};
     let stopped = false;
@@ -124,15 +127,9 @@
   });
 </script>
 
-<main bind:this={content} class:collapsed={settings.collapsed}>
+<main bind:this={content} class:collapsed={settings.collapsed} onpointerdown={dragCard}>
   {#if settings.collapsed}
     <div class="collapsed-row">
-      <button
-        class="icon drag"
-        aria-label="Move window"
-        title="Move window"
-        onpointerdown={() => drag()}><GripVertical size={16} /></button
-      >
       <span class="status-icon" data-status={status}><Activity size={16} /></span>
       <strong class="truncate" title={session?.path}>{session?.project || 'Codex Status'}</strong>
       <span class="numeric">{percent(bucket?.windows[0]?.remaining.value)}</span>
@@ -145,12 +142,6 @@
     </div>
   {:else}
     <header>
-      <button
-        class="icon drag"
-        aria-label="Move window"
-        title="Move window"
-        onpointerdown={() => drag()}><GripVertical size={16} /></button
-      >
       <strong class="brand">Codex Status</strong>
       {#if settings.muted}<BellOff size={14} aria-label="Notifications muted" />{/if}
       <button
@@ -246,7 +237,7 @@
           }}><X size={16} /></button
         >
       </div>
-      <div class="scroll-view">
+      <div class="scroll-view" data-no-drag>
         {#if view === 'details'}<Details {session} {snapshot} {now} />
         {:else if view === 'settings'}<Preferences {settings} {apply} />
         {:else}
