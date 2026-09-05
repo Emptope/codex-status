@@ -17,7 +17,7 @@
   } from '@lucide/svelte';
   import { empty, defaults, type Snapshot, type Settings } from '../types/status';
   import { activity, connectionLabel, percent } from '../state/format';
-  import { command, drag, fit, resizeHeight, save, subscribe } from '../state/bridge';
+  import { command, drag, fit, native, resizeHeight, save, subscribe } from '../state/bridge';
   import Quota from './Quota.svelte';
   import Details from './Details.svelte';
   import Preferences from './Settings.svelte';
@@ -31,6 +31,7 @@
   let refreshing = $state(false);
   let error = $state('');
   let resized = $state(false);
+  let fitting = 0;
   let content: HTMLElement;
   const session = $derived(
     snapshot.sessions.find((s) => s.id === (settings.pinnedSession || selected)) ||
@@ -99,10 +100,22 @@
     if (!content) return;
     const panel = !collapsed && currentView !== 'summary';
     if (!collapsed && resized) return;
+    fitting += 1;
     void fit(
       collapsed ? 240 : panel ? 360 : 300,
       panel ? 480 : Math.max(40, Math.ceil(content.scrollHeight)),
-    ).catch(() => {});
+    )
+      .catch(() => {})
+      .finally(() => {
+        requestAnimationFrame(() => {
+          fitting -= 1;
+        });
+      });
+  }
+  function followWindow() {
+    if (!native || settings.collapsed || resized || !content) return;
+    const fillsWindow = Math.abs(content.getBoundingClientRect().height - innerHeight) <= 1;
+    if (fitting === 0 || !fillsWindow) resized = true;
   }
   onMount(() => {
     let dispose = () => {};
@@ -112,6 +125,7 @@
     }, 1000);
     const observer = new ResizeObserver(() => fitCard());
     observer.observe(content);
+    window.addEventListener('resize', followWindow);
     void (async () => {
       dispose = await subscribe(
         (next) => {
@@ -139,6 +153,7 @@
       stopped = true;
       dispose();
       observer.disconnect();
+      window.removeEventListener('resize', followWindow);
       clearInterval(timer);
     };
   });

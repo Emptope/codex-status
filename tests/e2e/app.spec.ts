@@ -78,6 +78,35 @@ async function mock(page: Page) {
   });
 }
 
+async function mockNative(page: Page) {
+  await page.addInitScript(
+    ({ snapshot, settings }) => {
+      let callbackId = 0;
+      Object.defineProperty(globalThis, 'isTauri', { value: true, configurable: true });
+      Object.defineProperty(window, '__TAURI_INTERNALS__', {
+        configurable: true,
+        value: {
+          metadata: { currentWindow: { label: 'main' } },
+          transformCallback(callback: (...args: unknown[]) => unknown) {
+            const id = ++callbackId;
+            Object.assign(window, { [`_${id}`]: callback });
+            return id;
+          },
+          unregisterCallback(id: number) {
+            delete (window as unknown as Record<string, unknown>)[`_${id}`];
+          },
+          async invoke(command: string) {
+            if (command === 'snapshot') return snapshot;
+            if (command === 'preferences') return settings;
+            if (command === 'plugin:event|listen') return ++callbackId;
+          },
+        },
+      });
+    },
+    { snapshot, settings },
+  );
+}
+
 test.beforeEach(async ({ page }) => {
   await mock(page);
   await page.clock.install({ time: now });
@@ -107,6 +136,40 @@ test('the expanded card exposes a draggable bottom resize edge', async ({ page }
   await expect(edge).toBeVisible();
   await expect(edge).toHaveCSS('cursor', 'ns-resize');
   await expect(edge).toHaveAttribute('data-no-drag', '');
+});
+
+test('an expanded panel fills a window resized from its native edge', async ({
+  page,
+}, testInfo) => {
+  await mockNative(page);
+  await page.setViewportSize({ width: 360, height: 480 });
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: /a-project-with/ }).click();
+
+  await page.setViewportSize({ width: 360, height: 720 });
+
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.querySelector('main')!.getBoundingClientRect().height === innerHeight,
+      ),
+    )
+    .toBe(true);
+  const layout = await page.evaluate(() => {
+    const card = document.querySelector('main')!.getBoundingClientRect();
+    const panel = document.querySelector('.scroll-view')!.getBoundingClientRect();
+    return {
+      cardHeight: card.height,
+      viewportHeight: innerHeight,
+      bottomGap: card.bottom - panel.bottom,
+    };
+  });
+  expect(layout.cardHeight).toBe(layout.viewportHeight);
+  expect(layout.bottomGap).toBeLessThanOrEqual(8);
+  await page.screenshot({
+    path: `build/screenshots/resized-${testInfo.project.name}.png`,
+    fullPage: true,
+  });
 });
 
 test('collapsed mode has stable controls and no horizontal overflow', async ({ page }) => {
