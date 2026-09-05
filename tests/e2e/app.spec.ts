@@ -101,6 +101,13 @@ test('the card surface is draggable without a dedicated control or cursor overri
   await expect(page.locator('main')).toHaveCSS('cursor', 'auto');
 });
 
+test('the expanded card exposes a draggable bottom resize edge', async ({ page }) => {
+  const edge = page.getByRole('separator', { name: 'Resize height' });
+  await expect(edge).toBeVisible();
+  await expect(edge).toHaveCSS('cursor', 'ns-resize');
+  await expect(edge).toHaveAttribute('data-no-drag', '');
+});
+
 test('collapsed mode has stable controls and no horizontal overflow', async ({ page }) => {
   await page.getByRole('button', { name: 'Collapse' }).click();
   await expect(page.getByRole('button', { name: 'Expand' })).toBeVisible();

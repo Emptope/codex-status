@@ -27,7 +27,7 @@ Windows 全局 npm 源仍为原镜像。本次 pnpm 安装临时使用官方 reg
 ./scripts/build/windows.ps1 build
 ```
 
-Windows 和 WSL 不能复用另一平台生成的 `node_modules`。pnpm 内容仓库固定为 `D:\Projects\.pnpm-store`，两端按锁文件完整性校验包内容；Windows 统一入口会先以非交互模式执行离线的 `pnpm install --frozen-lockfile --trust-lockfile`，缓存不全时再联网执行同一锁定安装。切回 WSL 或其他系统时须在目标系统执行锁定安装。统一任务入口清理 `build` 内的页面、单文件发行产物、截图、测试结果和遗留安装包，并拒绝同时启动另一构建任务；项目内的 `build/cargo/<platform>-<arch>` 与 `build/vite-cache` 会跨任务复用，Cargo 缓存不会跨宿主平台混用。`pnpm build` 只生成一个带平台和架构后缀的可执行文件，不创建安装器或应用包。入口还会归一化 `/mnt/*` 上 Cargo 指纹时间，避免挂载时间精度使缓存被误判失效；需要完整重编译时才显式执行 `pnpm clean:cache`。
+Windows 和 WSL 不能复用另一平台生成的 `node_modules`。pnpm 内容仓库固定为 `D:\Projects\.pnpm-store`，两端按锁文件完整性校验包内容；Windows 统一入口会先以非交互模式执行离线的 `pnpm install --frozen-lockfile --trust-lockfile`，缓存不全时再联网执行同一锁定安装。切回 WSL 或其他系统时须在目标系统执行锁定安装。统一任务入口清理 `build` 内的页面、截图、测试结果和遗留安装包，并拒绝同时启动另一构建任务；版本化单文件和 SHA-256 统一保留在扁平的 `build/artifacts` 目录，构建只替换当前宿主文件，显式执行 `pnpm clean` 才清空所有平台产物。项目内的 `build/cargo/<platform>-<arch>` 与 `build/vite-cache` 会跨任务复用，Cargo 缓存不会跨宿主平台混用。入口还会归一化 `/mnt/*` 上 Cargo 指纹时间，避免挂载时间精度使缓存被误判失效；需要完整重编译时才显式执行 `pnpm clean:cache`。统一验收通过固定版本的 `zizmor` 检查 GitHub Actions。
 
 Windows 桌面进程可能继承安装 CLI 之前的旧 PATH。应用启动 CLI 时保留进程 PATH 的优先级，同时读取注册表中的最新用户和系统 PATH；无需注销即可在刷新后发现新安装的可执行程序。显式绝对路径仍按原值执行，不重新解释。
 

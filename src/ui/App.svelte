@@ -17,7 +17,7 @@
   } from '@lucide/svelte';
   import { empty, defaults, type Snapshot, type Settings } from '../types/status';
   import { activity, connection, percent } from '../state/format';
-  import { command, drag, fit, save, subscribe } from '../state/bridge';
+  import { command, drag, fit, resizeHeight, save, subscribe } from '../state/bridge';
   import Quota from './Quota.svelte';
   import Details from './Details.svelte';
   import Preferences from './Settings.svelte';
@@ -30,6 +30,7 @@
   let now = $state(Date.now());
   let refreshing = $state(false);
   let error = $state('');
+  let resized = $state(false);
   let content: HTMLElement;
   const session = $derived(
     snapshot.sessions.find((s) => s.id === (settings.pinnedSession || selected)) ||
@@ -77,9 +78,26 @@
   function dragCard(event: PointerEvent) {
     if (shouldDrag(event)) void drag();
   }
+  function resizeCard(event: PointerEvent) {
+    if (event.button !== 0 || !event.isPrimary) return;
+    event.stopPropagation();
+    resized = true;
+    void resizeHeight()
+      .then((started) => {
+        if (!started) resized = false;
+      })
+      .catch(() => {
+        resized = false;
+      });
+  }
+  function showView(next: typeof view) {
+    resized = false;
+    view = next;
+  }
   function fitCard(collapsed = settings.collapsed, currentView = view) {
     if (!content) return;
     const panel = !collapsed && currentView !== 'summary';
+    if (!collapsed && resized) return;
     void fit(
       collapsed ? 240 : panel ? 360 : 300,
       panel ? 480 : Math.max(40, Math.ceil(content.scrollHeight)),
@@ -99,7 +117,7 @@
           void accept(next).catch(() => {});
         },
         () => {
-          view = 'settings';
+          showView('settings');
         },
       );
       if (stopped) {
@@ -136,6 +154,7 @@
   bind:this={content}
   class:collapsed={settings.collapsed}
   class:panel={!settings.collapsed && view !== 'summary'}
+  class:resized
   onpointerdown={dragCard}
 >
   {#if settings.collapsed}
@@ -168,21 +187,24 @@
         title="Settings"
         aria-pressed={view === 'settings'}
         onclick={() => {
-          view = view === 'settings' ? 'summary' : 'settings';
+          showView(view === 'settings' ? 'summary' : 'settings');
         }}><SettingsIcon size={16} /></button
       >
       <button
         class="icon"
         aria-label="Collapse"
         title="Collapse"
-        onclick={() => update({ collapsed: true })}><ChevronUp size={16} /></button
+        onclick={() => {
+          resized = false;
+          void update({ collapsed: true });
+        }}><ChevronUp size={16} /></button
       >
     </header>
     <div class="session-heading">
       <button
         class="session-button"
         onclick={() => {
-          view = view === 'details' ? 'summary' : 'details';
+          showView(view === 'details' ? 'summary' : 'details');
         }}
         title={session?.path}
       >
@@ -228,7 +250,7 @@
         aria-label="Session list"
         aria-pressed={view === 'sessions'}
         onclick={() => {
-          view = view === 'sessions' ? 'summary' : 'sessions';
+          showView(view === 'sessions' ? 'summary' : 'sessions');
         }}><Users size={14} /><span>{snapshot.sessions.length} sessions</span></button
       ><span class="connection" class:warning={snapshot.connection !== 'connected'}
         >{connection[snapshot.connection] || 'Unknown'}</span
@@ -243,7 +265,7 @@
           aria-label="Close panel"
           title="Close"
           onclick={() => {
-            view = 'summary';
+            showView('summary');
           }}><X size={16} /></button
         >
       </div>
@@ -258,7 +280,7 @@
                 onclick={() => {
                   selected = item.id;
                   if (settings.pinnedSession) void update({ pinnedSession: item.id });
-                  view = 'details';
+                  showView('details');
                 }}
                 ><span class="session-name">{item.project || 'Unknown project'}</span><span
                   data-status={item.activity.value || 'unknown'}
@@ -269,5 +291,15 @@
         {/if}
       </div>
     {/if}
+  {/if}
+  {#if !settings.collapsed}
+    <div
+      class="resize-edge"
+      role="separator"
+      aria-label="Resize height"
+      aria-orientation="horizontal"
+      data-no-drag
+      onpointerdown={resizeCard}
+    ></div>
   {/if}
 </main>

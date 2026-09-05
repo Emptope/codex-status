@@ -18,7 +18,7 @@
         "minHeight": 40,
         "decorations": false,
         "alwaysOnTop": true,
-        "resizable": false,
+        "resizable": true,
         "visible": false
       }
     ],

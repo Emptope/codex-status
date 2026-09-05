@@ -94,6 +94,7 @@ button {
 }
 
 main {
+  position: relative;
   width: 100%;
   max-width: 560px;
   margin: 0 auto;
@@ -106,6 +107,44 @@ main.panel {
   height: min(480px, 100vh);
   flex-direction: column;
   overflow: hidden;
+}
+
+main.resized {
+  height: 100vh;
+}
+
+main.resized:not(.panel) {
+  display: flex;
+  flex-direction: column;
+}
+
+main.resized:not(.panel) footer {
+  margin-top: auto;
+}
+
+.resize-edge {
+  position: absolute;
+  z-index: 1;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 8px;
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.resize-edge::after {
+  position: absolute;
+  right: 35%;
+  bottom: 2px;
+  left: 35%;
+  height: 1px;
+  background: var(--line);
+  content: '';
+}
+
+.resize-edge:hover::after {
+  background: var(--muted);
 }
 
 header,

@@ -18,9 +18,19 @@ async function removeDirectory(directory, message) {
   await rm(directory, { recursive: true, force: true });
 }
 
-export async function cleanBuild() {
-  const repository = await realpath(root);
-  const directory = join(repository, 'build');
+async function artifactFilesOnly(directory) {
+  const entries = await readdir(directory, { withFileTypes: true }).catch((error) => {
+    if (error.code === 'ENOENT') return [];
+    throw error;
+  });
+  for (const entry of entries) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) await removeDirectory(path, 'Unsafe artifact directory');
+    else if (!entry.isFile()) throw new Error('Unsafe artifact output');
+  }
+}
+
+export async function cleanOutputs(directory, { preserveArtifacts = false } = {}) {
   const info = await lstat(directory).catch((error) => {
     if (error.code === 'ENOENT') return null;
     throw error;
@@ -32,9 +42,12 @@ export async function cleanBuild() {
     throw new Error('Unsafe build directory');
   }
   await mkdir(directory, { recursive: true });
-  for (const name of ['web', 'artifacts', 'release', 'screenshots', 'test-results']) {
+  for (const name of ['web', 'release', 'screenshots', 'test-results']) {
     await removeDirectory(join(directory, name), 'Unsafe build output');
   }
+  const artifacts = join(directory, 'artifacts');
+  if (preserveArtifacts) await artifactFilesOnly(artifacts);
+  else await removeDirectory(artifacts, 'Unsafe build output');
   const cargo = join(directory, 'cargo');
   const targets = await readdir(cargo, { withFileTypes: true }).catch((error) => {
     if (error.code === 'ENOENT') return [];
@@ -47,6 +60,11 @@ export async function cleanBuild() {
     }
   }
   return directory;
+}
+
+export async function cleanBuild(options) {
+  const repository = await realpath(root);
+  return cleanOutputs(join(repository, 'build'), options);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

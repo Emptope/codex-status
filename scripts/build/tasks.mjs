@@ -4,7 +4,7 @@ import { cargoTarget, runWithNormalizedTimes } from './cargo.mjs';
 import { cleanBuild, root } from './clean.mjs';
 import { acquireBuildLock } from './lock.mjs';
 import { start, startPackage } from './process.mjs';
-import { stageExecutable } from './release.mjs';
+import { clearArtifact, stageExecutable } from './release.mjs';
 
 const task = process.argv[2];
 if (!['verify', 'build', 'dev', 'preview'].includes(task)) throw new Error('Unknown task');
@@ -77,12 +77,14 @@ process.once('SIGINT', interrupt);
 process.once('SIGTERM', interrupt);
 let failure;
 try {
-  await cleanBuild();
+  await cleanBuild({ preserveArtifacts: true });
   if (task === 'verify') {
+    await run('uvx', ['--from', 'zizmor==1.30.0', 'zizmor', '.github/workflows']);
     await runPackage([
       'exec',
       'prettier',
       '--check',
+      '.github',
       'src',
       'scripts',
       'tests',
@@ -112,6 +114,7 @@ try {
       '--test',
       '--experimental-test-isolation=none',
       'scripts/build/cargo.test.mjs',
+      'scripts/build/clean.test.mjs',
       'scripts/build/lock.test.mjs',
       'scripts/build/process.test.mjs',
       'scripts/build/release.test.mjs',
@@ -121,10 +124,12 @@ try {
     await runPackage(['exec', 'vitest', 'run']);
     await runPackage(['exec', 'playwright', 'test']);
   } else if (task === 'build') {
+    await clearArtifact(root);
     await runPackage(['exec', 'vite', 'build']);
     await runPackageBuild(['exec', 'tauri', 'build', '--no-bundle', '--ci']);
     const artifact = await stageExecutable(root, env.CARGO_TARGET_DIR);
     console.log(`Built executable at ${artifact.path} (${artifact.bytes} bytes)`);
+    console.log(`Wrote checksum at ${artifact.checksumPath}`);
   } else if (task === 'dev') {
     const vite = runPackage(['exec', 'vite']);
     vite.catch(() => {});

@@ -4,13 +4,15 @@
 
 ## 当前结果
 
-Rust、Tauri 2、Svelte 5 工程和统一任务入口已经可运行。每个入口清理 `build` 内的页面、单文件发行产物、截图、测试结果和遗留安装包，并保留 `build/cargo/<platform>-<arch>` 与 `build/vite-cache` 增量缓存；Vite 不监听生成目录。`pnpm build` 按宿主输出一个单文件到 `build/artifacts/<platform>/<arch>/codex-status[.exe]`，其中平台目录为 `windows`、`linux` 或 `macos`，不生成安装器或应用包；Cargo 固定生成的 `build/cargo/<platform>-<arch>/release` 仅是编译缓存。应用和托盘使用统一生成的 `>_<` 平面图标。构建锁会拒绝并发任务，Windows 入口先加载 Visual Studio 开发环境。格式、类型、Clippy、Rust 测试、Node.js 测试、前端测试及 Playwright 页面测试已纳入同一个验证命令。
+Rust、Tauri 2、Svelte 5 工程和统一任务入口已经可运行。每个入口清理 `build` 内的页面、截图、测试结果和遗留安装包，并保留 `build/cargo/<platform>-<arch>`、`build/vite-cache` 及其他平台的最终产物；Vite 不监听生成目录。`pnpm build` 按宿主将带版本、平台和架构名称的单文件及 SHA-256 写入扁平的 `build/artifacts`，只替换当前宿主文件；显式执行 `pnpm clean` 才清空所有平台产物。Cargo 固定生成的 `build/cargo/<platform>-<arch>/release` 仅是编译缓存。tag 发布工作流覆盖 Windows x64、Linux x64、macOS x64 和 macOS arm64，四个任务全部验证并构建成功后才创建 GitHub Release。固定版本的 `zizmor` 已纳入统一验收和独立 Actions 安全工作流，第三方 Action 固定到完整提交哈希，发布写权限只授予最终发布任务。应用和托盘使用统一生成的 `>_<` 平面图标。构建锁会拒绝并发任务，Windows 入口先加载 Visual Studio 开发环境。格式、类型、Clippy、Rust 测试、Node.js 测试、前端测试及 Playwright 页面测试已纳入同一个验证命令。
 
 Cargo 的可复用 target 缓存保持在项目内的 `build/cargo/<platform>-<arch>`，没有移动到 WSL 文件系统或项目外，也不会在 Windows 与 WSL 间混用。`/mnt/*` 挂载会把 Cargo 主动设置的指纹时间截为整秒，却保留自然写入文件的纳秒，导致生成文件被误判为构建后变化；统一入口会在编译成功、失败或中断后归一化 Cargo 生成目录的时间，不改源码、不删缓存。实测同一测试命令由错误重编译时的 78 秒降至缓存命中时约 9 秒，第三方依赖不再重复编译。需要主动排除缓存影响时才显式执行 `pnpm clean:cache`。
 
 WSL2 / WSLg 从清理目录实际编译并启动了无边框置顶窗口。240px 与桌面宽度的浏览器交互测试通过，长文本、18px 字号、深色主题、折叠态和离线降级没有横向溢出。Playwright 需要允许测试服务器监听 `127.0.0.1:1420`；受限沙箱内会以 `EPERM` 退出。
 
-窗口实现包含拖动、置顶、尺寸自适应、位置保存及屏幕内校正。托盘包含显示/隐藏、刷新、设置和退出；托盘创建失败时关闭按钮正常退出，不会把窗口隐藏成无法恢复的后台进程。Windows 单文件发行程序已实际启动。Windows 子进程解析会保留当前进程 PATH 的优先级，并合并注册表中的最新用户和系统 PATH；即使启动进程继承的 PATH 尚未刷新，也已实测定位并读取原生 CLI 0.153.4。位置校正已有纯逻辑覆盖；托盘点击、实际拖动、位置恢复和显示器变化仍需桌面实测。
+窗口实现包含整卡拖动、展开态下边缘高度调整、置顶、尺寸自适应、位置保存及屏幕内校正。下边缘使用系统原生向南缩放手势，开始手动调整后窗口内容填满新高度且不会被自动适配立即覆盖；缩放区与整卡移动互斥，桌面宽度和 240px 页面回归通过。托盘包含显示/隐藏、刷新、设置和退出；托盘创建失败时关闭按钮正常退出，不会把窗口隐藏成无法恢复的后台进程。Windows 单文件发行程序已实际启动。Windows 子进程解析会保留当前进程 PATH 的优先级，并合并注册表中的最新用户和系统 PATH；即使启动进程继承的 PATH 尚未刷新，也已实测定位并读取原生 CLI 0.153.4。位置校正已有纯逻辑覆盖；托盘点击、原生移动与缩放、位置恢复和显示器变化仍需桌面实测。
+
+2026-09-05 在 Linux x64 和 Windows x64 宿主分别执行 `pnpm verify` 和 `pnpm build`，两个平台均通过固定版本 `zizmor`、格式、类型、Clippy、15 个 Rust 测试、20 个 Node.js 测试、4 个 Vitest 测试和 12 个 Playwright 场景。统一目录同时保留 6,582,088 字节的 `codex-status-v0.1.0-linux-x64` 和 4,873,728 字节的 `codex-status-v0.1.0-windows-x64.exe`，逐文件 SHA-256 校验通过。macOS x64 和 macOS arm64 的工作流配置已补齐但尚未在本仓库远端运行；所有产物仍未签名，不能替代 P1.3 的签名、公证和干净环境启动验收。
 
 Windows 增量构建曾在图标源文件更新后继续复用旧的已编译资源。从新单文件 exe 提取出的仍是旧图标，证明问题不只是资源管理器缓存。桌面构建脚本现显式跟踪整个 `icons` 目录；复用同一 release 缓存重建后，Windows 资源库重新生成，从单文件 exe 提取出的图标已变为新 `>_<` 图标。该跟踪同时覆盖其他平台的图标格式。
 
