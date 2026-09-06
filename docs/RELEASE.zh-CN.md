@@ -58,7 +58,19 @@ spctl --assess --type execute --verbose=2 <mounted-app>
 1. 只在 `src-tauri/Cargo.toml` 中更新一次版本，再更新 `src-tauri/Cargo.lock`。包元数据、Tauri、产物命名和发布校验均自动获取该版本。
 2. 运行 `pnpm verify` 和 `pnpm build`；四个 CI 任务全部通过后再合并。
 3. 完成实机、许可证、包内容和持续运行闸门；如果 CI 尚未配置签名，需确认可以分发未签名的 Windows 和 macOS 文件。
-4. 使用 `git tag -s "v$(node scripts/build/validate.mjs version)"` 创建并推送与版本一致的签名 tag，随后将自动公开发布。
+4. 同步 `main`，生成并校验发布 tag，然后创建无签名的附注 tag 并推送：
+
+   ```sh
+   git switch main
+   git pull --ff-only
+   release_tag="v$(node scripts/build/validate.mjs version)"
+   node scripts/build/validate.mjs tag "$release_tag"
+   git tag -a --no-sign "$release_tag" -m "codex-status $release_tag"
+   git push origin "$release_tag"
+   ```
+
+   推送 tag 后将自动公开发布。不要移动或覆盖已有发布 tag；应提升项目版本并创建新 tag。tag 签名仍为可选项。
+
 5. 等待公开 Release 生成，核对四个发布产物、四个校验和及 `LICENSE`。在每个目标上复核校验和、安装与启动；配置 CI 签名后，还需复核 Windows 和 macOS 签名。
 
 Linux `.deb` 面向 Ubuntu 22.04 构建，并声明 WebKitGTK 4.1 和 AppIndicator 运行时依赖。Wayland 下的置顶、全局位置和托盘行为取决于合成器，必须按支持的降级行为实测。

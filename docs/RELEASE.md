@@ -58,7 +58,19 @@ On both Windows 11 x64 and Ubuntu 22.04 x64, run one hour in the foreground and 
 1. Update the version once in `src-tauri/Cargo.toml`, then update `src-tauri/Cargo.lock`. Package metadata, Tauri, artifact naming, and release validation derive it automatically.
 2. Run `pnpm verify` and `pnpm build`, then merge only after all four CI jobs pass.
 3. Complete the native, license, package-content, and endurance gates. Confirm that unsigned Windows and macOS distribution is acceptable unless CI signing has been configured.
-4. Create and push a signed matching tag with `git tag -s "v$(node scripts/build/validate.mjs version)"`. This starts automatic publication.
+4. Synchronize `main`, derive and validate the release tag, then create an unsigned annotated tag and push it:
+
+   ```sh
+   git switch main
+   git pull --ff-only
+   release_tag="v$(node scripts/build/validate.mjs version)"
+   node scripts/build/validate.mjs tag "$release_tag"
+   git tag -a --no-sign "$release_tag" -m "codex-status $release_tag"
+   git push origin "$release_tag"
+   ```
+
+   Pushing the tag starts automatic publication. Do not move or overwrite an existing release tag; increment the project version and create a new tag instead. Tag signing remains optional.
+
 5. Wait for the public Release, then confirm the four release artifacts, four checksums, and `LICENSE`. Recheck checksums, installation, and startup on every target, plus Windows and macOS signatures when CI signing is enabled.
 
 The Linux `.deb` targets Ubuntu 22.04 and declares its WebKitGTK 4.1 and AppIndicator runtime dependencies. Under Wayland, always-on-top, global positioning, and tray behavior depend on the compositor and must be tested with the supported fallback behavior.
