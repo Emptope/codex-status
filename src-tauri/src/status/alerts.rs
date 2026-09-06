@@ -15,17 +15,11 @@ pub enum AlertKind {
     Quota,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct QuotaState {
-    reset: Option<i64>,
-    low: bool,
-}
-
 #[derive(Default)]
 pub struct Alerts {
     initialized: bool,
     sessions: BTreeMap<String, (Option<i64>, Option<Activity>)>,
-    quotas: BTreeMap<String, QuotaState>,
+    quotas: BTreeMap<String, bool>,
 }
 
 impl Alerts {
@@ -69,12 +63,8 @@ impl Alerts {
                         .remaining
                         .value
                         .is_some_and(|value| value <= f64::from(threshold));
-                let current = QuotaState {
-                    reset: window.resets_at,
-                    low,
-                };
-                let previous = self.quotas.insert(key, current);
-                if low && previous.is_none_or(|old| !old.low || old.reset != current.reset) {
+                let previous = self.quotas.insert(key, low);
+                if low && previous.is_none_or(|old| !old) {
                     alerts.push(Alert {
                         title: "Quota low",
                         body: format!(
@@ -132,7 +122,7 @@ mod tests {
     }
 
     #[test]
-    fn low_quota_notifies_once_per_threshold_crossing_or_reset() {
+    fn low_quota_notifies_once_per_threshold_crossing() {
         let mut remaining = Field::absent("appServer", Quality::Unavailable);
         remaining.set(9.0, 1);
         let mut snapshot = Snapshot {
@@ -158,6 +148,46 @@ mod tests {
         assert_eq!(tracker.observe(&snapshot, 10)[0].title, "Quota low");
         assert!(tracker.observe(&snapshot, 10).is_empty());
         snapshot.quotas[0].windows[0].resets_at = Some(200);
-        assert_eq!(tracker.observe(&snapshot, 10)[0].title, "Quota low");
+        assert!(tracker.observe(&snapshot, 10).is_empty());
+    }
+
+    #[test]
+    fn task_completion_does_not_repeat_an_active_low_quota_alert() {
+        let mut session = session();
+        session.apply(Event::TurnStarted {
+            at: 1,
+            turn: "turn".into(),
+        });
+        let mut remaining = Field::absent("local", Quality::Unavailable);
+        remaining.set(9.0, 1);
+        let mut snapshot = Snapshot {
+            sessions: vec![session],
+            quotas: vec![Quota {
+                id: "quota".into(),
+                name: "Account".into(),
+                windows: vec![QuotaWindow {
+                    remaining,
+                    minutes: Some(300),
+                    resets_at: Some(100),
+                }],
+                credit_balance: None,
+                unlimited_credits: None,
+            }],
+            ..Snapshot::default()
+        };
+        let mut tracker = Alerts::default();
+        assert_eq!(tracker.observe(&snapshot, 10)[0].kind, AlertKind::Quota);
+
+        snapshot.sessions[0].apply(Event::TurnEnded {
+            at: 2,
+            turn: "turn".into(),
+            activity: Activity::Completed,
+            duration_ms: None,
+        });
+        snapshot.quotas[0].windows[0].resets_at = Some(200);
+
+        let alerts = tracker.observe(&snapshot, 10);
+        assert_eq!(alerts.len(), 1);
+        assert_eq!(alerts[0].kind, AlertKind::Completion);
     }
 }
