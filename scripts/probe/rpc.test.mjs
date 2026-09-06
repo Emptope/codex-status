@@ -17,6 +17,9 @@ function processStub() {
 }
 
 test('only observation requests are available and parameters cannot widen access', () => {
+  assert.deepEqual(request('initialize'), {
+    clientInfo: { name: 'codex_status_probe', version: '0.0.0' },
+  });
   for (const method of ['thread/resume', 'turn/start', 'account/login/start', 'command/exec']) {
     assert.throws(() => request(method, {}), /forbidden/);
   }

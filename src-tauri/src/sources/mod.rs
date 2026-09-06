@@ -38,21 +38,41 @@ struct Changes {
     reconcile: bool,
 }
 
+impl Changes {
+    fn push(&mut self, event: notify::Result<notify::Event>) {
+        match event {
+            Ok(event) => {
+                self.reconcile |= event.need_rescan();
+                self.paths.extend(event.paths);
+            }
+            Err(_) => self.reconcile = true,
+        }
+    }
+}
+
 fn drain(receive: &mpsc::Receiver<notify::Result<notify::Event>>, lost: &AtomicBool) -> Changes {
     let mut changes = Changes {
         reconcile: lost.swap(false, Ordering::Relaxed),
         ..Changes::default()
     };
     while let Ok(event) = receive.try_recv() {
-        match event {
-            Ok(event) => {
-                changes.reconcile |= event.need_rescan();
-                changes.paths.extend(event.paths);
-            }
-            Err(_) => changes.reconcile = true,
-        }
+        changes.push(event);
     }
     changes
+}
+
+fn quotas_observed_at(quotas: &[crate::status::Quota]) -> Option<i64> {
+    quotas
+        .iter()
+        .flat_map(|quota| &quota.windows)
+        .filter_map(|window| window.remaining.observed_at)
+        .max()
+}
+
+fn prefer_local_quotas(source: QuotaSource, local: Option<i64>, current: Option<i64>) -> bool {
+    source == QuotaSource::Local
+        || source == QuotaSource::Rpc
+            && local.is_some_and(|local| current.is_none_or(|current| local > current))
 }
 
 fn account_mode(value: &Value) -> &'static str {
@@ -207,7 +227,8 @@ impl Runtime {
         let mut roots: Vec<String> = Vec::new();
         let mut local = local::Local::default();
         let mut reconcile = Instant::now() - Duration::from_secs(60);
-        let mut use_local_quotas = false;
+        let mut source = QuotaSource::None;
+        let mut pending = None;
         while !self.stop.load(Ordering::Relaxed) {
             let mut dirty = false;
             let preferences = self.preferences();
@@ -226,15 +247,18 @@ impl Runtime {
                 reconcile = Instant::now() - Duration::from_secs(60);
                 dirty = true;
             }
-            let next_use_local_quotas = {
+            let next_source = {
                 let state = self.state.lock().unwrap();
-                quota_source(&state.account) == QuotaSource::Local
+                quota_source(&state.account)
             };
-            if use_local_quotas != next_use_local_quotas {
-                use_local_quotas = next_use_local_quotas;
+            if source != next_source {
+                source = next_source;
                 dirty = true;
             }
             let mut changes = drain(&receive, &lost);
+            if let Some(event) = pending.take() {
+                changes.push(event);
+            }
             changes.reconcile |= changes.paths.iter().any(|path| {
                 path.is_dir()
                     || roots
@@ -270,7 +294,7 @@ impl Runtime {
                 self.publish(move |state| {
                     state.sessions = sessions;
                     state.local_error = local_error;
-                    if use_local_quotas {
+                    if prefer_local_quotas(source, observed_at, quotas_observed_at(&state.quotas)) {
                         state.quotas = quotas;
                         if observed_at.is_some() {
                             state.updated_at = observed_at;
@@ -278,7 +302,14 @@ impl Runtime {
                     }
                 });
             }
-            std::thread::sleep(Duration::from_millis(250));
+            pending = match receive.recv_timeout(Duration::from_millis(250)) {
+                Ok(event) => Some(event),
+                Err(mpsc::RecvTimeoutError::Timeout) => None,
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    std::thread::sleep(Duration::from_millis(250));
+                    None
+                }
+            };
         }
     }
 

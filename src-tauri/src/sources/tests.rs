@@ -1,8 +1,9 @@
 use super::executable::marked_path;
 use super::{
-    drain,
+    QuotaSource, drain,
     executable::{application_dirs_in, combine_paths, extend_paths, resolve_in},
     local::Local,
+    prefer_local_quotas,
 };
 use crate::status::Activity;
 use notify::{Event, EventKind, event::Flag};
@@ -125,4 +126,20 @@ fn reconciliation_advances_a_record_after_an_imprecise_change() {
         local.snapshot()[0].activity.value,
         Some(Activity::Completed)
     );
+}
+
+#[test]
+fn fresh_local_quota_updates_chatgpt_without_replacing_newer_rpc_data() {
+    assert!(prefer_local_quotas(QuotaSource::Rpc, Some(200), Some(100)));
+    assert!(!prefer_local_quotas(QuotaSource::Rpc, Some(100), Some(200)));
+    assert!(prefer_local_quotas(
+        QuotaSource::Local,
+        Some(100),
+        Some(200)
+    ));
+    assert!(!prefer_local_quotas(
+        QuotaSource::None,
+        Some(200),
+        Some(100)
+    ));
 }

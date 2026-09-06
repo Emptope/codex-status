@@ -267,6 +267,7 @@ pub fn run() {
         .setup(|app| {
             configure_presence(app);
             let handle = app.handle().clone();
+            sound::prepare(&handle);
             let path = app.path().app_config_dir()?.join("settings.json");
             let runtime = Runtime::new(path, move |snapshot| {
                 let _ = handle.emit("status", &snapshot);

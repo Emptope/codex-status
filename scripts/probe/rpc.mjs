@@ -4,7 +4,7 @@ import manifest from '../../package.json' with { type: 'json' };
 export function request(method, params = {}) {
   switch (method) {
     case 'initialize':
-      return { clientInfo: { name: 'codex_status_probe', version: manifest.version } };
+      return { clientInfo: { name: 'codex_status_probe', version: manifest.version || '0.0.0' } };
     case 'account/read':
       return { refreshToken: false };
     case 'account/rateLimits/read':
