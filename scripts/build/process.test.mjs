@@ -2,7 +2,13 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
-import { packageInvocation, start } from './process.mjs';
+import { normalizeColorEnv, packageInvocation, start } from './process.mjs';
+
+test('forced color subprocesses do not inherit the conflicting opt-out', () => {
+  const env = { NO_COLOR: '1', FORCE_COLOR: '1', PATH: '/tools' };
+  assert.equal(normalizeColorEnv(env), env);
+  assert.deepEqual(env, { FORCE_COLOR: '1', PATH: '/tools' });
+});
 
 async function waitForExit(pid) {
   let state = null;

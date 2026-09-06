@@ -7,13 +7,13 @@
 | Target      | GitHub runner    | Artifact                              |
 | ----------- | ---------------- | ------------------------------------- |
 | Windows x64 | `windows-latest` | `codex-status-vX.Y.Z-windows-x64.exe` |
-| Linux x64   | `ubuntu-22.04`   | `codex-status-vX.Y.Z-linux-x64`       |
-| macOS x64   | `macos-15-intel` | `codex-status-vX.Y.Z-macos-x64`       |
-| macOS arm64 | `macos-15`       | `codex-status-vX.Y.Z-macos-arm64`     |
+| Linux x64   | `ubuntu-22.04`   | `codex-status-vX.Y.Z-linux-x64.deb`   |
+| macOS x64   | `macos-15-intel` | `codex-status-vX.Y.Z-macos-x64.dmg`   |
+| macOS arm64 | `macos-15`       | `codex-status-vX.Y.Z-macos-arm64.dmg` |
 
-Every push to `main` and pull request runs all four targets through the reusable `Build target` workflow. Each job validates the runner, project versions, checks, build output, executable permissions, artifact name, and checksum.
+Every push to `main` and pull request runs all four targets through the reusable `Build target` workflow. Each job validates the runner, project versions, checks, build output, artifact format, name, and checksum.
 
-A matching `vX.Y.Z` tag rebuilds the matrix and publishes a GitHub Release containing four binaries, four `.sha256` files, and `LICENSE`.
+A matching `vX.Y.Z` tag rebuilds the matrix and publishes a GitHub Release containing one Windows executable, one Linux package, two macOS disk images, four `.sha256` files, and `LICENSE`.
 
 ## Release Gates
 
@@ -21,11 +21,13 @@ Complete every gate before pushing the release tag because a successful release 
 
 ### Native smoke tests
 
-On clean Windows 11 x64 and Ubuntu 22.04 x64 systems, test:
+On clean systems for every supported target, test:
 
+- install, upgrade, and removal using the published artifact;
 - startup, shutdown, tray show/hide, and tray exit;
+- no taskbar entry on Windows or Linux and no Dock entry on macOS;
 - window dragging, resizing, and position restore;
-- status and low-quota notifications;
+- status and low-quota notifications, including both configurable sound types and previews;
 - default paths, custom paths, and Codex CLI data ingestion;
 - no-data, unavailable-CLI, and network-failure states.
 
@@ -33,12 +35,12 @@ Record the OS, architecture, Codex CLI version, desktop environment, timestamp, 
 
 ### Signing
 
-- Automatic releases do not currently have access to code-signing credentials, so their Windows and macOS binaries are unsigned.
-- Before distributing signed binaries, configure Authenticode signing for Windows and Developer ID signing and notarization for macOS in the release workflow. Verify that both commands below pass for the generated macOS artifacts.
+- Automatic releases do not currently have access to code-signing credentials, so their Windows executable and macOS application are unsigned.
+- Before distributing signed artifacts, configure Authenticode signing for Windows and Developer ID signing and notarization for macOS in the release workflow. Mount each disk image and verify its application with both commands below.
 
 ```sh
-codesign --verify --strict --verbose=2 <artifact>
-spctl --assess --type execute --verbose=2 <artifact>
+codesign --verify --strict --verbose=2 <mounted-app>
+spctl --assess --type execute --verbose=2 <mounted-app>
 ```
 
 Generate the SHA-256 files after signing and notarization.
@@ -53,10 +55,10 @@ On both Windows 11 x64 and Ubuntu 22.04 x64, run one hour in the foreground and 
 
 ## Procedure
 
-1. Update the version in `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`; update lockfiles.
+1. Update the version once in `src-tauri/Cargo.toml`, then update `src-tauri/Cargo.lock`. Package metadata, Tauri, artifact naming, and release validation derive it automatically.
 2. Run `pnpm verify` and `pnpm build`, then merge only after all four CI jobs pass.
 3. Complete the native, license, package-content, and endurance gates. Confirm that unsigned Windows and macOS distribution is acceptable unless CI signing has been configured.
-4. Create and push a signed matching tag, for example `git tag -s v0.1.0`. This starts automatic publication.
-5. Wait for the public Release, then confirm the four binaries, four checksums, and `LICENSE`. Recheck checksums and startup on Windows and Ubuntu, plus Windows and macOS signatures when CI signing is enabled.
+4. Create and push a signed matching tag with `git tag -s "v$(node scripts/build/validate.mjs version)"`. This starts automatic publication.
+5. Wait for the public Release, then confirm the four release artifacts, four checksums, and `LICENSE`. Recheck checksums, installation, and startup on every target, plus Windows and macOS signatures when CI signing is enabled.
 
-The Linux binary targets Ubuntu 22.04 and requires WebKitGTK 4.1 and AppIndicator at runtime. Under Wayland, always-on-top, global positioning, and tray behavior depend on the compositor and must be tested with the supported fallback behavior.
+The Linux `.deb` targets Ubuntu 22.04 and declares its WebKitGTK 4.1 and AppIndicator runtime dependencies. Under Wayland, always-on-top, global positioning, and tray behavior depend on the compositor and must be tested with the supported fallback behavior.

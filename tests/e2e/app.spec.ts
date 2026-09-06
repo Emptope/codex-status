@@ -57,6 +57,8 @@ const settings = {
   pinnedSession: null,
   selectedBucket: null,
   notifications: true,
+  completionSound: true,
+  quotaSound: 'alert',
   muted: false,
   lowQuota: 10,
   position: null,
@@ -73,10 +75,24 @@ async function mock(page: Page) {
   });
 }
 
+async function mockSound(page: Page) {
+  await page.addInitScript(() => {
+    Object.defineProperty(HTMLMediaElement.prototype, 'play', {
+      configurable: true,
+      value() {
+        const target = window as typeof window & { __soundPlays?: number };
+        target.__soundPlays = (target.__soundPlays || 0) + 1;
+        return Promise.resolve();
+      },
+    });
+  });
+}
+
 async function mockNative(page: Page) {
   await page.addInitScript(
     ({ snapshot, settings }) => {
       let callbackId = 0;
+      const listeners = new Map<string, number[]>();
       type Invocation = { command: string; args: Record<string, unknown> };
       Object.defineProperty(globalThis, 'isTauri', { value: true, configurable: true });
       Object.assign(window, { __nativeInvocations: [] as Invocation[] });
@@ -100,8 +116,22 @@ async function mockNative(page: Page) {
             ).__nativeInvocations.push({ command, args });
             if (command === 'snapshot') return snapshot;
             if (command === 'preferences') return settings;
-            if (command === 'plugin:event|listen') return ++callbackId;
+            if (command === 'plugin:event|listen') {
+              const event = String(args.event);
+              listeners.set(event, [...(listeners.get(event) || []), Number(args.handler)]);
+              return ++callbackId;
+            }
           },
+        },
+      });
+      Object.assign(window, {
+        __emitNative(event: string, payload: unknown) {
+          for (const id of listeners.get(event) || []) {
+            const callback = (window as unknown as Record<string, (value: unknown) => void>)[
+              `_${id}`
+            ];
+            callback?.({ event, id, payload });
+          }
         },
       });
     },
@@ -122,6 +152,8 @@ test('summary, details, sessions and settings remain operable', async ({ page })
   await expect(brand).toHaveAttribute('src', /icon(?:-[\w-]+)?\.svg/);
   await expect(page.locator('.session-button svg')).toHaveCount(0);
   await expect(page.getByText('64%')).toBeVisible();
+  await expect(page.locator('meter').nth(0)).toHaveAttribute('data-level', 'high');
+  await expect(page.locator('meter').nth(1)).toHaveAttribute('data-level', 'medium');
   await expect(page.locator('.text-tool span')).toHaveText('1 session');
   await page.getByRole('button', { name: /a-project-with/ }).click();
   await expect(page.getByText('Token usage')).toBeVisible();
@@ -278,10 +310,19 @@ test('collapsed mode has stable controls and no horizontal overflow', async ({
 }, testInfo) => {
   await page.getByRole('button', { name: 'Collapse' }).click();
   await expect(page.locator('.collapsed-row img')).toHaveCount(0);
+  const status = page.locator('.collapsed-status');
+  await expect(status).toHaveText('Running');
+  await expect(status).toHaveAttribute('data-status', 'running');
   const expand = page.getByRole('button', { name: 'Expand' });
   await expect(expand).toBeVisible();
   await expect(expand.locator('svg')).toHaveCount(1);
   await expect(page.locator('.collapsed-row > strong')).toHaveCSS('padding-left', '4px');
+  const order = await page.evaluate(() => {
+    const status = document.querySelector('.collapsed-status')!.getBoundingClientRect();
+    const quota = document.querySelector('.collapsed-row .numeric')!.getBoundingClientRect();
+    return status.right <= quota.left;
+  });
+  expect(order).toBe(true);
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
   expect(overflow).toBeLessThanOrEqual(0);
   await page.screenshot({ path: `build/screenshots/collapsed-${testInfo.project.name}.png` });
@@ -376,6 +417,81 @@ test('settings controls align without text overlap', async ({ page }, testInfo) 
     path: `build/screenshots/settings-${testInfo.project.name}.png`,
     fullPage: true,
   });
+});
+
+test('task completion sound is enabled by default and configurable', async ({ page }) => {
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const control = page.getByRole('checkbox', { name: 'Task completion sound' });
+  await expect(control).toBeChecked();
+  await control.uncheck();
+  const request = page.waitForRequest(
+    (request) => request.url().endsWith('/api/save_preferences') && request.method() === 'POST',
+  );
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  expect((await request).postDataJSON().settings.completionSound).toBe(false);
+});
+
+test('task completion sound can be previewed from settings', async ({ page }) => {
+  await mockSound(page);
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('button', { name: 'Preview task completion sound' }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as typeof window & { __soundPlays?: number }).__soundPlays || 0),
+    )
+    .toBe(1);
+});
+
+test('quota warning sound can be selected and previewed', async ({ page }) => {
+  await mockSound(page);
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const sound = page.getByRole('combobox', { name: 'Quota warning sound' });
+  await expect(sound).toHaveValue('alert');
+  await sound.selectOption('battery');
+  await page.getByRole('button', { name: 'Preview quota warning sound' }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as typeof window & { __soundPlays?: number }).__soundPlays || 0),
+    )
+    .toBe(1);
+  const request = page.waitForRequest(
+    (request) => request.url().endsWith('/api/save_preferences') && request.method() === 'POST',
+  );
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  expect((await request).postDataJSON().settings.quotaSound).toBe('battery');
+});
+
+test('desktop completion events play the configured sound', async ({ page }) => {
+  await mockSound(page);
+  await mockNative(page);
+  await page.reload({ waitUntil: 'networkidle' });
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        (
+          window as typeof window & {
+            __nativeInvocations: Array<{ command: string; args: Record<string, unknown> }>;
+          }
+        ).__nativeInvocations.some(
+          ({ command, args }) => command === 'plugin:event|listen' && args.event === 'play-sound',
+        ),
+      ),
+    )
+    .toBe(true);
+  await page.evaluate(() =>
+    (
+      window as typeof window & {
+        __emitNative: (event: string, payload: unknown) => void;
+      }
+    ).__emitNative('play-sound', 'completion'),
+  );
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as typeof window & { __soundPlays?: number }).__soundPlays || 0),
+    )
+    .toBe(1);
 });
 
 test('large text, themes and degraded states remain readable', async ({ page }, testInfo) => {

@@ -59,6 +59,7 @@ export interface Snapshot {
   localError: string | null;
   refreshing: boolean;
 }
+export type QuotaSound = 'off' | 'alert' | 'battery';
 export interface Settings {
   roots: string[];
   executable: string;
@@ -70,6 +71,8 @@ export interface Settings {
   pinnedSession: string | null;
   selectedBucket: string | null;
   notifications: boolean;
+  completionSound: boolean;
+  quotaSound: QuotaSound;
   muted: boolean;
   lowQuota: number;
   position: [number, number] | null;
@@ -97,6 +100,8 @@ export const defaults: Settings = {
   pinnedSession: null,
   selectedBucket: null,
   notifications: true,
+  completionSound: true,
+  quotaSound: 'alert',
   muted: false,
   lowQuota: 10,
   position: null,

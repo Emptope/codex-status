@@ -1,7 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Codex Status",
-  "version": "0.1.0",
   "identifier": "io.codexstatus.desktop",
   "build": {
     "frontendDist": "../build/web",
@@ -19,6 +18,7 @@
         "decorations": false,
         "alwaysOnTop": true,
         "resizable": false,
+        "skipTaskbar": true,
         "visible": false
       }
     ],

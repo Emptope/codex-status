@@ -1,5 +1,14 @@
 import { spawn } from 'node:child_process';
 
+export function normalizeColorEnv(env) {
+  delete env.NO_COLOR;
+  return env;
+}
+
+export function normalizeProcessColorEnv() {
+  return normalizeColorEnv(process.env);
+}
+
 async function terminateWindows(pid, force) {
   const args = ['/PID', String(pid), '/T'];
   if (force) args.push('/F');

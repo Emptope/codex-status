@@ -1,11 +1,13 @@
 <script lang="ts">
   import type { QuotaWindow } from '../types/status';
   import { countdown, duration, percent, time } from '../state/format';
+  import { quotaLevel } from '../state/quota';
   let {
     window: quota,
     now,
     details = false,
   }: { window: QuotaWindow; now: number; details?: boolean } = $props();
+  const level = $derived(quotaLevel(quota.remaining.value));
 </script>
 
 <div class="quota-row" class:stale={quota.remaining.quality === 'stale'}>
@@ -18,9 +20,11 @@
     <meter
       min="0"
       max="100"
-      low="20"
+      low="10"
+      high="50"
       optimum="100"
       value={quota.remaining.value}
+      data-level={level}
       aria-label={`${duration(quota.minutes)} quota remaining`}
     ></meter>
   {/if}

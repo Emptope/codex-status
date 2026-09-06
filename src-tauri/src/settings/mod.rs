@@ -6,6 +6,15 @@ use std::{
 };
 use tempfile::NamedTempFile;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum QuotaSound {
+    Off,
+    #[default]
+    Alert,
+    Battery,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct Settings {
@@ -19,6 +28,8 @@ pub struct Settings {
     pub pinned_session: Option<String>,
     pub selected_bucket: Option<String>,
     pub notifications: bool,
+    pub completion_sound: bool,
+    pub quota_sound: QuotaSound,
     pub muted: bool,
     pub low_quota: u8,
     pub position: Option<(i32, i32)>,
@@ -37,6 +48,8 @@ impl Default for Settings {
             pinned_session: None,
             selected_bucket: None,
             notifications: true,
+            completion_sound: true,
+            quota_sound: QuotaSound::Alert,
             muted: false,
             low_quota: 10,
             position: None,
@@ -142,6 +155,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.json");
         let mut settings = Settings::default();
+        assert!(settings.completion_sound);
         settings.save(&path).unwrap();
         settings.font_size = 15;
         settings.save(&path).unwrap();
@@ -151,5 +165,15 @@ mod tests {
         assert_eq!(warning.as_deref(), Some("settings-recovered"));
         settings.roots = vec!["relative".into()];
         assert!(settings.save(&path).is_err());
+    }
+
+    #[test]
+    fn older_settings_enable_completion_sound_by_default() {
+        let mut value = serde_json::to_value(Settings::default()).unwrap();
+        value.as_object_mut().unwrap().remove("completionSound");
+        value.as_object_mut().unwrap().remove("quotaSound");
+        let settings = serde_json::from_value::<Settings>(value).unwrap();
+        assert!(settings.completion_sound);
+        assert_eq!(settings.quota_sound, QuotaSound::Alert);
     }
 }

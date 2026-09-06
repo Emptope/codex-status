@@ -33,6 +33,8 @@ export function preview() {
         pinnedSession: null,
         selectedBucket: null,
         notifications: true,
+        completionSound: true,
+        quotaSound: 'alert',
         muted: false,
         lowQuota: 10,
         position: null,

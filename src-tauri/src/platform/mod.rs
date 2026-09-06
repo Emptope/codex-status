@@ -1,22 +1,71 @@
 use crate::{
-    settings::Settings,
+    settings::{QuotaSound, Settings},
     sources::Runtime,
-    status::{Snapshot, alerts::Alerts},
+    status::{
+        Snapshot,
+        alerts::{AlertKind, Alerts},
+    },
 };
+use serde::Serialize;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
 use tauri::{
     Emitter, Manager, PhysicalPosition, PhysicalSize, Window,
-    menu::{Menu, MenuItem, PredefinedMenuItem},
+    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 use tauri_plugin_notification::NotificationExt;
 
+const SOUND_EVENT: &str = "play-sound";
+
+#[cfg(target_os = "macos")]
+fn configure_presence(app: &mut tauri::App) {
+    app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+}
+
+#[cfg(not(target_os = "macos"))]
+fn configure_presence(_app: &mut tauri::App) {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum Sound {
+    Completion,
+    QuotaAlert,
+    QuotaBattery,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct Delivery {
+    notification: bool,
+    sound: Option<Sound>,
+}
+
+fn delivery(settings: &Settings, kind: AlertKind) -> Delivery {
+    let sound = if settings.muted {
+        None
+    } else {
+        match kind {
+            AlertKind::Completion if settings.completion_sound => Some(Sound::Completion),
+            AlertKind::Quota => match settings.quota_sound {
+                QuotaSound::Off => None,
+                QuotaSound::Alert => Some(Sound::QuotaAlert),
+                QuotaSound::Battery => Some(Sound::QuotaBattery),
+            },
+            _ => None,
+        }
+    };
+    Delivery {
+        notification: settings.notifications && !settings.muted,
+        sound,
+    }
+}
+
 struct AppState {
     runtime: Arc<Runtime>,
     tray: AtomicBool,
+    visibility: Mutex<Option<CheckMenuItem<tauri::Wry>>>,
     alerts: Mutex<Alerts>,
 }
 
@@ -74,30 +123,35 @@ fn quit(app: tauri::AppHandle) {
     app.exit(0);
 }
 
-fn show(app: &tauri::AppHandle) {
+fn set_visible(app: &tauri::AppHandle, visible: bool) {
     if let Some(window) = app.get_webview_window("main") {
-        let _ = ensure_visible(&window);
-        let _ = window.show();
-        let _ = window.set_focus();
-        app.state::<AppState>()
-            .runtime
-            .hidden
-            .store(false, Ordering::Relaxed);
+        if visible {
+            let _ = ensure_visible(&window);
+            let _ = window.show();
+            let _ = window.set_focus();
+        } else {
+            let _ = window.hide();
+        }
+    }
+    let state = app.state::<AppState>();
+    state.runtime.hidden.store(!visible, Ordering::Relaxed);
+    if let Ok(item) = state.visibility.lock()
+        && let Some(item) = item.as_ref()
+    {
+        let _ = item.set_checked(visible);
     }
 }
 
+fn show(app: &tauri::AppHandle) {
+    set_visible(app, true);
+}
+
 fn toggle(app: &tauri::AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        if window.is_visible().unwrap_or(false) {
-            let _ = window.hide();
-            app.state::<AppState>()
-                .runtime
-                .hidden
-                .store(true, Ordering::Relaxed);
-        } else {
-            show(app);
-        }
-    }
+    let visible = app
+        .get_webview_window("main")
+        .and_then(|window| window.is_visible().ok())
+        .unwrap_or(false);
+    set_visible(app, !visible);
 }
 
 fn clamp(
@@ -145,7 +199,8 @@ fn ensure_visible(window: &tauri::WebviewWindow) -> tauri::Result<()> {
 }
 
 fn install_tray(app: &tauri::App) -> tauri::Result<bool> {
-    let toggle_item = MenuItem::with_id(app, "toggle", "Show / Hide", true, None::<&str>)?;
+    let visibility_item =
+        CheckMenuItem::with_id(app, "visibility", "Show / Hide", true, true, None::<&str>)?;
     let refresh_item = MenuItem::with_id(app, "refresh", "Refresh", true, None::<&str>)?;
     let settings_item = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
@@ -153,7 +208,7 @@ fn install_tray(app: &tauri::App) -> tauri::Result<bool> {
     let menu = Menu::with_items(
         app,
         &[
-            &toggle_item,
+            &visibility_item,
             &refresh_item,
             &settings_item,
             &separator,
@@ -169,7 +224,7 @@ fn install_tray(app: &tauri::App) -> tauri::Result<bool> {
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
-            "toggle" => toggle(app),
+            "visibility" => toggle(app),
             "refresh" => app.state::<AppState>().runtime.request_refresh(),
             "settings" => {
                 show(app);
@@ -191,6 +246,9 @@ fn install_tray(app: &tauri::App) -> tauri::Result<bool> {
             }
         })
         .build(app)?;
+    if let Ok(mut item) = app.state::<AppState>().visibility.lock() {
+        *item = Some(visibility_item);
+    }
     Ok(true)
 }
 
@@ -207,6 +265,7 @@ pub fn run() {
             quit
         ])
         .setup(|app| {
+            configure_presence(app);
             let handle = app.handle().clone();
             let path = app.path().app_config_dir()?.join("settings.json");
             let runtime = Runtime::new(path, move |snapshot| {
@@ -218,8 +277,12 @@ pub fn run() {
                         .lock()
                         .map(|mut alerts| alerts.observe(&snapshot, preferences.low_quota))
                         .unwrap_or_default();
-                    if preferences.notifications && !preferences.muted {
-                        for alert in alerts {
+                    for alert in alerts {
+                        let delivery = delivery(&preferences, alert.kind);
+                        if let Some(sound) = delivery.sound {
+                            let _ = handle.emit(SOUND_EVENT, sound);
+                        }
+                        if delivery.notification {
                             let _ = handle
                                 .notification()
                                 .builder()
@@ -233,6 +296,7 @@ pub fn run() {
             app.manage(AppState {
                 runtime: runtime.clone(),
                 tray: AtomicBool::new(false),
+                visibility: Mutex::new(None),
                 alerts: Mutex::new(Alerts::default()),
             });
             tauri::async_runtime::spawn(async move {
@@ -260,8 +324,7 @@ pub fn run() {
                     let state = window.app_handle().state::<AppState>();
                     if state.tray.load(Ordering::Relaxed) {
                         api.prevent_close();
-                        let _ = window.hide();
-                        state.runtime.hidden.store(true, Ordering::Relaxed);
+                        set_visible(window.app_handle(), false);
                     }
                 }
                 tauri::WindowEvent::Moved(position) => {
@@ -324,5 +387,48 @@ mod tests {
             ),
             PhysicalPosition::new(1_900, 680),
         );
+    }
+
+    #[test]
+    fn completion_sound_has_an_independent_setting_and_respects_mute() {
+        let mut settings = Settings {
+            notifications: false,
+            ..Settings::default()
+        };
+        assert_eq!(
+            delivery(&settings, AlertKind::Completion),
+            Delivery {
+                notification: false,
+                sound: Some(Sound::Completion),
+            }
+        );
+        assert_eq!(delivery(&settings, AlertKind::Status).sound, None);
+        settings.completion_sound = false;
+        assert_eq!(delivery(&settings, AlertKind::Completion).sound, None);
+        settings.completion_sound = true;
+        settings.muted = true;
+        assert_eq!(delivery(&settings, AlertKind::Completion).sound, None);
+    }
+
+    #[test]
+    fn quota_sound_is_selectable_and_independent_of_visual_notifications() {
+        let mut settings = Settings {
+            notifications: false,
+            ..Settings::default()
+        };
+        assert_eq!(
+            delivery(&settings, AlertKind::Quota),
+            Delivery {
+                notification: false,
+                sound: Some(Sound::QuotaAlert),
+            }
+        );
+        settings.quota_sound = QuotaSound::Battery;
+        assert_eq!(
+            delivery(&settings, AlertKind::Quota).sound,
+            Some(Sound::QuotaBattery)
+        );
+        settings.quota_sound = QuotaSound::Off;
+        assert_eq!(delivery(&settings, AlertKind::Quota).sound, None);
     }
 }

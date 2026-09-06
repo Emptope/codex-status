@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { chmod, copyFile, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 
 export function executableName(name, platform = process.platform) {
@@ -12,9 +12,26 @@ export function platformName(platform) {
   return platform;
 }
 
+function bundleType(platform) {
+  if (platform === 'win32') return null;
+  if (platform === 'linux') return 'deb';
+  if (platform === 'darwin') return 'dmg';
+  throw new Error(`Unsupported release platform: ${platform}`);
+}
+
+export function bundleArgs(platform = process.platform) {
+  const bundle = bundleType(platform);
+  return bundle ? ['--bundles', bundle, '--ci'] : ['--no-bundle', '--ci'];
+}
+
+function releaseStem(name, version, platform, arch) {
+  return `${name}-v${version}-${platformName(platform)}-${arch}`;
+}
+
 export function releaseName(name, version, platform = process.platform, arch = process.arch) {
-  const extension = platform === 'win32' ? '.exe' : '';
-  return `${name}-v${version}-${platformName(platform)}-${arch}${extension}`;
+  const bundle = bundleType(platform);
+  const extension = bundle ? `.${bundle}` : '.exe';
+  return `${releaseStem(name, version, platform, arch)}${extension}`;
 }
 
 export function artifactPath(
@@ -27,29 +44,26 @@ export function artifactPath(
   return join(root, 'build', 'artifacts', releaseName(name, version, platform, arch));
 }
 
-async function packageManifest(root) {
-  return JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
+async function releaseSource(target, name, platform) {
+  const bundle = bundleType(platform);
+  if (!bundle) return join(target, 'release', executableName(name, platform));
+  const directory = join(target, 'release', 'bundle', bundle);
+  const entries = await readdir(directory, { withFileTypes: true });
+  const packages = entries.filter((entry) => entry.isFile() && entry.name.endsWith(`.${bundle}`));
+  if (packages.length !== 1) throw new Error(`Expected one ${bundle} release package`);
+  return join(directory, packages[0].name);
 }
 
-async function packageMetadata(root) {
-  const manifest = await packageManifest(root);
-  if (typeof manifest.name !== 'string' || !manifest.name)
-    throw new Error('Package name is missing');
-  if (typeof manifest.version !== 'string' || !manifest.version)
-    throw new Error('Package version is missing');
-  return { name: manifest.name, version: manifest.version };
-}
-
-export async function stageExecutable(
+export async function stageArtifact(
   root,
   target,
+  metadata,
   platform = process.platform,
   arch = process.arch,
 ) {
-  const metadata = await packageMetadata(root);
-  const source = join(target, 'release', executableName(metadata.name, platform));
+  const source = await releaseSource(target, metadata.name, platform);
   const sourceInfo = await stat(source);
-  if (!sourceInfo.isFile()) throw new Error('Release executable is missing');
+  if (!sourceInfo.isFile()) throw new Error('Release artifact is missing');
   const destination = artifactPath(root, metadata.name, metadata.version, platform, arch);
   await mkdir(dirname(destination), { recursive: true });
   await copyFile(source, destination);
@@ -68,8 +82,20 @@ export async function stageExecutable(
   };
 }
 
-export async function clearArtifact(root, platform = process.platform, arch = process.arch) {
-  const metadata = await packageMetadata(root);
-  const path = artifactPath(root, metadata.name, metadata.version, platform, arch);
-  await Promise.all([rm(path, { force: true }), rm(`${path}.sha256`, { force: true })]);
+export async function clearArtifact(
+  root,
+  metadata,
+  platform = process.platform,
+  arch = process.arch,
+) {
+  const directory = join(root, 'build', 'artifacts');
+  const stem = releaseStem(metadata.name, metadata.version, platform, arch);
+  const entries = await readdir(directory).catch((error) => {
+    if (error.code === 'ENOENT') return [];
+    throw error;
+  });
+  const paths = entries
+    .filter((name) => name === stem || name.startsWith(`${stem}.`))
+    .map((name) => join(directory, name));
+  await Promise.all(paths.map((path) => rm(path, { force: true })));
 }

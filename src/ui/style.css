@@ -293,20 +293,34 @@ meter::-webkit-meter-bar {
   background: var(--track);
 }
 
-meter::-webkit-meter-optimum-value {
+meter[data-level='high']::-webkit-meter-optimum-value,
+meter[data-level='high']::-webkit-meter-suboptimum-value,
+meter[data-level='high']::-webkit-meter-even-less-good-value {
   background: var(--green);
 }
 
-meter::-webkit-meter-suboptimum-value {
+meter[data-level='medium']::-webkit-meter-optimum-value,
+meter[data-level='medium']::-webkit-meter-suboptimum-value,
+meter[data-level='medium']::-webkit-meter-even-less-good-value {
   background: var(--amber);
 }
 
-meter::-webkit-meter-even-less-good-value {
+meter[data-level='low']::-webkit-meter-optimum-value,
+meter[data-level='low']::-webkit-meter-suboptimum-value,
+meter[data-level='low']::-webkit-meter-even-less-good-value {
   background: var(--red);
 }
 
-meter::-moz-meter-bar {
+meter[data-level='high']::-moz-meter-bar {
   background: var(--green);
+}
+
+meter[data-level='medium']::-moz-meter-bar {
+  background: var(--amber);
+}
+
+meter[data-level='low']::-moz-meter-bar {
+  background: var(--red);
 }
 
 .stale .quota-label {
@@ -493,12 +507,37 @@ th:first-child {
   justify-self: end;
 }
 
+.setting-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+}
+
+.sound-preview {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 4px 7px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.sound-preview:hover {
+  background: var(--hover);
+}
+
 .setting input[type='number'] {
   width: 72px;
 }
 
 .setting select {
   width: 152px;
+}
+
+.sound-choice select {
+  width: 115px;
 }
 
 input,
@@ -605,6 +644,15 @@ textarea {
   padding-left: 4px;
 }
 
+.collapsed-status {
+  flex: 0 1 auto;
+  max-width: 42%;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .collapsed-row .numeric {
   white-space: nowrap;
 }
@@ -632,6 +680,14 @@ textarea {
 
   .setting select {
     width: 100%;
+  }
+
+  .sound-choice select {
+    width: 55px;
+  }
+
+  .sound-preview span {
+    display: none;
   }
 
   .session-item {

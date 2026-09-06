@@ -34,13 +34,15 @@ export function validateHost(platform, arch, actual = process) {
 }
 
 export function validateVersions(packageManifest, tauriConfig, cargoPackage) {
-  const versions = [packageManifest.version, tauriConfig.version, cargoPackage.version];
+  const versions = [cargoPackage.version, packageManifest.version, tauriConfig.version].filter(
+    (version) => version !== undefined,
+  );
   if (versions.some((version) => typeof version !== 'string' || !semver.test(version))) {
     throw new Error('Project versions must be valid semantic versions');
   }
   if (new Set(versions).size !== 1) {
     throw new Error(
-      `Version mismatch: package=${versions[0]}, tauri=${versions[1]}, cargo=${versions[2]}`,
+      `Version mismatch: cargo=${cargoPackage.version}, package=${packageManifest.version}, tauri=${tauriConfig.version}`,
     );
   }
   if (packageManifest.name !== cargoPackage.name) {
@@ -48,7 +50,17 @@ export function validateVersions(packageManifest, tauriConfig, cargoPackage) {
       `Package name mismatch: package=${packageManifest.name}, cargo=${cargoPackage.name}`,
     );
   }
-  return { name: packageManifest.name, version: versions[0] };
+  return { name: packageManifest.name, version: cargoPackage.version };
+}
+
+export function validatePresence(tauriConfig) {
+  const windows = tauriConfig.app?.windows;
+  if (!Array.isArray(windows) || windows.length === 0) {
+    throw new Error('Project must configure at least one desktop window');
+  }
+  if (windows.some((window) => window?.skipTaskbar !== true)) {
+    throw new Error('Every desktop window must enable skipTaskbar');
+  }
 }
 
 export async function projectMetadata(directory = root) {
@@ -75,6 +87,7 @@ export async function projectMetadata(directory = root) {
   const members = new Set(cargoMetadata.workspace_members);
   const cargoPackages = cargoMetadata.packages.filter((item) => members.has(item.id));
   if (cargoPackages.length !== 1) throw new Error('Expected one Cargo workspace package');
+  validatePresence(tauriConfig);
   return validateVersions(packageManifest, tauriConfig, cargoPackages[0]);
 }
 
@@ -85,13 +98,7 @@ function artifactNames(metadata) {
   });
 }
 
-export async function verifyArtifact(
-  directory,
-  metadata,
-  platform,
-  arch,
-  { requireExecutable = false } = {},
-) {
+export async function verifyArtifact(directory, metadata, platform, arch) {
   target(platform, arch);
   const name = releaseName(metadata.name, metadata.version, platform, arch);
   const path = join(directory, 'build', 'artifacts', name);
@@ -103,9 +110,6 @@ export async function verifyArtifact(
   ]);
   if (!info.isFile() || info.isSymbolicLink() || info.size === 0) {
     throw new Error(`Invalid release artifact: ${name}`);
-  }
-  if (requireExecutable && platform !== 'win32' && (info.mode & 0o111) === 0) {
-    throw new Error(`Release artifact is not executable: ${name}`);
   }
   const digest = createHash('sha256').update(content).digest('hex');
   const expected = `${digest}  ${basename(path)}\n`;
@@ -123,9 +127,7 @@ export async function verifyArtifacts(directory, metadata) {
     );
   }
   return Promise.all(
-    targets.map(({ platform, arch }) =>
-      verifyArtifact(directory, metadata, platform, arch, { requireExecutable: false }),
-    ),
+    targets.map(({ platform, arch }) => verifyArtifact(directory, metadata, platform, arch)),
   );
 }
 
@@ -144,6 +146,10 @@ async function main([command, ...args]) {
     console.log(`Validated ${metadata.name} v${metadata.version}`);
     return;
   }
+  if (command === 'version') {
+    console.log(metadata.version);
+    return;
+  }
   if (command === 'tag') {
     const expected = `v${metadata.version}`;
     if (args[0] !== expected) throw new Error(`Tag must be ${expected}`);
@@ -152,9 +158,7 @@ async function main([command, ...args]) {
   }
   if (command === 'artifact') {
     validateHost(args[0], args[1]);
-    const artifact = await verifyArtifact(root, metadata, args[0], args[1], {
-      requireExecutable: true,
-    });
+    const artifact = await verifyArtifact(root, metadata, args[0], args[1]);
     await output('name', artifact.name);
     console.log(`Validated ${artifact.name}`);
     return;
@@ -164,7 +168,7 @@ async function main([command, ...args]) {
     console.log(`Validated ${artifacts.length} release artifacts`);
     return;
   }
-  throw new Error('Expected metadata, tag, host, artifact, or artifacts');
+  throw new Error('Expected metadata, version, tag, host, artifact, or artifacts');
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

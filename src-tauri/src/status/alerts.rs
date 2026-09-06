@@ -5,6 +5,14 @@ use std::collections::{BTreeMap, BTreeSet};
 pub struct Alert {
     pub title: &'static str,
     pub body: String,
+    pub kind: AlertKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlertKind {
+    Status,
+    Completion,
+    Quota,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -29,14 +37,14 @@ impl Alerts {
             let current = (session.activity.observed_at, session.activity.value);
             let previous = self.sessions.insert(session.id.clone(), current);
             if self.initialized && previous.is_some() && previous != Some(current) {
-                let title = match session.activity.value {
-                    Some(Activity::WaitingApproval) => Some("Approval needed"),
-                    Some(Activity::WaitingInput) => Some("Input needed"),
-                    Some(Activity::Completed) => Some("Task completed"),
-                    Some(Activity::Failed) => Some("Task failed"),
+                let alert = match session.activity.value {
+                    Some(Activity::WaitingApproval) => Some(("Approval needed", AlertKind::Status)),
+                    Some(Activity::WaitingInput) => Some(("Input needed", AlertKind::Status)),
+                    Some(Activity::Completed) => Some(("Task completed", AlertKind::Completion)),
+                    Some(Activity::Failed) => Some(("Task failed", AlertKind::Status)),
                     _ => None,
                 };
-                if let Some(title) = title {
+                if let Some((title, kind)) = alert {
                     alerts.push(Alert {
                         title,
                         body: if session.project.is_empty() {
@@ -44,6 +52,7 @@ impl Alerts {
                         } else {
                             session.project.clone()
                         },
+                        kind,
                     });
                 }
             }
@@ -73,6 +82,7 @@ impl Alerts {
                             quota.name,
                             window.remaining.value.unwrap_or_default()
                         ),
+                        kind: AlertKind::Quota,
                     });
                 }
             }
@@ -115,7 +125,9 @@ mod tests {
             activity: Activity::Completed,
             duration_ms: None,
         });
-        assert_eq!(tracker.observe(&snapshot, 10)[0].title, "Task completed");
+        let alert = &tracker.observe(&snapshot, 10)[0];
+        assert_eq!(alert.title, "Task completed");
+        assert_eq!(alert.kind, AlertKind::Completion);
         assert!(tracker.observe(&snapshot, 10).is_empty());
     }
 

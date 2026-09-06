@@ -19,22 +19,26 @@
 
 Codex Status displays local sessions, context usage, account quotas, and status notifications. It watches session data without modifying it and queries the configured `codex app-server` process for live account data.
 
+Newly completed tasks play the bundled ding sound by default. Low-quota alerts can use either bundled warning sound. Sounds can be selected, previewed, or disabled under Notifications in Settings.
+
+The app stays in the system tray on Windows and Linux and in the menu bar on macOS, without adding a taskbar or Dock entry. The tray's **Show / Hide** option can hide the card without stopping background monitoring or sounds. Turn off Status notifications while leaving Task completion sound enabled for sound-only alerts.
+
 By default, it resolves `codex` from `PATH` and reads `CODEX_HOME`, falling back to `~/.codex`. The executable and data roots are configurable in the app.
 
 ## Install
 
-Download the binary and matching `.sha256` file from GitHub Releases:
+Download the release artifact and matching `.sha256` file from GitHub Releases:
 
-| Platform       | Artifact                                |
-| -------------- | --------------------------------------- |
-| Windows 11 x64 | `codex-status-vX.Y.Z-windows-x64.exe`   |
-| macOS 14+      | `codex-status-vX.Y.Z-macos-{x64,arm64}` |
-| Linux x64      | `codex-status-vX.Y.Z-linux-x64`         |
+| Platform       | Artifact                                    |
+| -------------- | ------------------------------------------- |
+| Windows 11 x64 | `codex-status-vX.Y.Z-windows-x64.exe`       |
+| macOS 14+      | `codex-status-vX.Y.Z-macos-{x64,arm64}.dmg` |
+| Ubuntu x64     | `codex-status-vX.Y.Z-linux-x64.deb`         |
 
-Verify the checksum before running the binary. On macOS and Linux, first make it executable:
+Verify the checksum before use. Run the Windows `.exe` directly, open the macOS `.dmg` and move Codex Status to Applications, or install the Ubuntu package:
 
 ```sh
-chmod +x codex-status-vX.Y.Z-<platform>-<arch>
+sudo apt install ./codex-status-vX.Y.Z-linux-x64.deb
 ```
 
 ## Develop
@@ -48,7 +52,7 @@ pnpm dev
 pnpm build
 ```
 
-`pnpm verify` runs formatting, type, lint, unit, integration, and browser checks. `pnpm build` writes the host binary and SHA-256 file to `build/artifacts`.
+`pnpm verify` runs formatting, type, lint, unit, integration, and browser checks. `pnpm build` writes the host release artifact and SHA-256 file to `build/artifacts`.
 
 On Windows, use `./scripts/build/windows.ps1 verify|build|dev` to initialize the MSVC environment and run the selected task.
 

@@ -3,8 +3,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { cargoTarget, runWithNormalizedTimes } from './cargo.mjs';
 import { cleanBuild, root } from './clean.mjs';
 import { acquireBuildLock } from './lock.mjs';
-import { start, startPackage } from './process.mjs';
-import { clearArtifact, stageExecutable } from './release.mjs';
+import { normalizeColorEnv, start, startPackage } from './process.mjs';
+import { bundleArgs, clearArtifact, stageArtifact } from './release.mjs';
 import { projectMetadata, verifyArtifact } from './validate.mjs';
 
 const task = process.argv[2];
@@ -12,8 +12,7 @@ if (!['verify', 'build', 'dev', 'preview'].includes(task)) throw new Error('Unkn
 const lockPath = join(root, '.build.lock');
 const releaseLock = await acquireBuildLock(lockPath);
 const jobs = new Set();
-const env = { ...process.env, CARGO_TARGET_DIR: cargoTarget(root) };
-delete env.NO_COLOR;
+const env = normalizeColorEnv({ ...process.env, CARGO_TARGET_DIR: cargoTarget(root) });
 let interrupted = false;
 let stopping;
 
@@ -128,14 +127,12 @@ try {
     await runPackage(['exec', 'vitest', 'run']);
     await runPackage(['exec', 'playwright', 'test']);
   } else if (task === 'build') {
-    await clearArtifact(root);
+    await clearArtifact(root, metadata);
     await runPackage(['exec', 'vite', 'build']);
-    await runPackageBuild(['exec', 'tauri', 'build', '--no-bundle', '--ci']);
-    const artifact = await stageExecutable(root, env.CARGO_TARGET_DIR);
-    await verifyArtifact(root, metadata, process.platform, process.arch, {
-      requireExecutable: true,
-    });
-    console.log(`Built executable at ${artifact.path} (${artifact.bytes} bytes)`);
+    await runPackageBuild(['exec', 'tauri', 'build', ...bundleArgs()]);
+    const artifact = await stageArtifact(root, env.CARGO_TARGET_DIR, metadata);
+    await verifyArtifact(root, metadata, process.platform, process.arch);
+    console.log(`Built release artifact at ${artifact.path} (${artifact.bytes} bytes)`);
     console.log(`Wrote checksum at ${artifact.checksumPath}`);
   } else if (task === 'dev') {
     const vite = runPackage(['exec', 'vite']);

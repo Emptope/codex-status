@@ -15,6 +15,7 @@
   import { empty, defaults, type Snapshot, type Settings } from '../types/status';
   import { activity, connectionLabel, percent, unit } from '../state/format';
   import { command, drag, fit, native, resizeHeight, save, subscribe } from '../state/bridge';
+  import { playSound } from '../state/sound';
   import Quota from './Quota.svelte';
   import Details from './Details.svelte';
   import Preferences from './Settings.svelte';
@@ -152,6 +153,9 @@
         () => {
           showView('settings');
         },
+        (sound) => {
+          void playSound(sound).catch(() => {});
+        },
       );
       if (stopped) {
         dispose();
@@ -195,6 +199,9 @@
   {#if settings.collapsed}
     <div class="collapsed-row">
       <strong class="truncate" title={session?.path}>{session?.project || 'Codex Status'}</strong>
+      {#if session}<span class="collapsed-status" data-status={status} title={activity[status]}
+          >{activity[status]}</span
+        >{/if}
       <span class="numeric">{percent(bucket?.windows[0]?.remaining.value)}</span>
       <button
         class="icon"

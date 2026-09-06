@@ -2,6 +2,7 @@ import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import type { Settings, Snapshot } from '../types/status';
+import type { Sound } from './sound';
 
 export const native = isTauri();
 export async function command<T>(name: string, args: Record<string, unknown> = {}): Promise<T> {
@@ -17,13 +18,16 @@ export async function command<T>(name: string, args: Record<string, unknown> = {
 export async function subscribe(
   update: (snapshot: Snapshot) => void,
   settings: () => void,
+  play: (sound: Sound) => void,
 ): Promise<() => void> {
   if (native) {
     const stop = await listen<Snapshot>('status', (event) => update(event.payload));
     const menu = await listen('open-settings', settings);
+    const sound = await listen<Sound>('play-sound', (event) => play(event.payload));
     return () => {
       stop();
       menu();
+      sound();
     };
   }
   const timer = window.setInterval(() => {

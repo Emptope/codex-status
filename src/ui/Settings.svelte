@@ -1,8 +1,9 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { Save, LogOut } from '@lucide/svelte';
+  import { Save, LogOut, Volume2 } from '@lucide/svelte';
   import type { Settings } from '../types/status';
   import { command, native } from '../state/bridge';
+  import { playSound, type Sound } from '../state/sound';
   let { settings, apply }: { settings: Settings; apply: (value: Settings) => Promise<void> } =
     $props();
   function copy(value: Settings): Settings {
@@ -16,6 +17,14 @@
   let roots = $state(untrack(() => settings.roots.join('\n')));
   let saving = $state(false);
   let error = $state('');
+  async function preview(sound: Sound) {
+    error = '';
+    try {
+      await playSound(sound);
+    } catch {
+      error = 'Could not play sound';
+    }
+  }
   async function submit(event: SubmitEvent) {
     event.preventDefault();
     saving = true;
@@ -72,6 +81,40 @@
       bind:checked={draft.notifications}
     /></label
   >
+  <div class="setting">
+    <span class="setting-label">Task completion sound</span>
+    <div class="setting-actions">
+      <button
+        class="sound-preview"
+        type="button"
+        aria-label="Preview task completion sound"
+        onclick={() => preview('completion')}><Volume2 size={14} /><span>Preview</span></button
+      >
+      <input
+        type="checkbox"
+        aria-label="Task completion sound"
+        bind:checked={draft.completionSound}
+      />
+    </div>
+  </div>
+  <div class="setting">
+    <span class="setting-label">Quota warning sound</span>
+    <div class="setting-actions sound-choice">
+      <button
+        class="sound-preview"
+        type="button"
+        disabled={draft.quotaSound === 'off'}
+        aria-label="Preview quota warning sound"
+        onclick={() => preview(draft.quotaSound === 'battery' ? 'quotaBattery' : 'quotaAlert')}
+        ><Volume2 size={14} /></button
+      >
+      <select aria-label="Quota warning sound" bind:value={draft.quotaSound}
+        ><option value="off">Off</option><option value="alert">Alert</option><option value="battery"
+          >Battery</option
+        ></select
+      >
+    </div>
+  </div>
   <label class="setting"
     ><span class="setting-label">Muted</span><input
       type="checkbox"

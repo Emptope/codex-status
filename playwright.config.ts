@@ -1,4 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
+import { normalizeProcessColorEnv } from './scripts/build/process.mjs';
+
+normalizeProcessColorEnv();
 
 const port = 1421;
 
