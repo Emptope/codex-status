@@ -1,70 +1,64 @@
-# 发布
+# Release Runbook
 
-## 构建矩阵
+[简体中文](RELEASE.zh-CN.md)
 
-| 系统        | GitHub runner    | 产物                                  |
+## Build Matrix
+
+| Target      | GitHub runner    | Artifact                              |
 | ----------- | ---------------- | ------------------------------------- |
 | Windows x64 | `windows-latest` | `codex-status-vX.Y.Z-windows-x64.exe` |
 | Linux x64   | `ubuntu-22.04`   | `codex-status-vX.Y.Z-linux-x64`       |
 | macOS x64   | `macos-15-intel` | `codex-status-vX.Y.Z-macos-x64`       |
 | macOS arm64 | `macos-15`       | `codex-status-vX.Y.Z-macos-arm64`     |
 
-提交和 PR 由 `CI` 工作流执行四个目标的构建检查。`vX.Y.Z` tag 触发相同构建流程，并创建包含八个产物和 MIT `LICENSE` 的 Draft Release。工作流不公开 Release。
+Every push to `main` and pull request runs all four targets through the reusable `Build target` workflow. Each job validates the runner, project versions, checks, build output, executable permissions, artifact name, and checksum.
 
-构建会检查：
+A matching `vX.Y.Z` tag rebuilds the matrix and creates a draft GitHub Release containing four binaries, four `.sha256` files, and `LICENSE`. Automation never publishes the draft.
 
-- runner 的操作系统与架构符合目标；
-- `package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json` 版本一致；
-- 可执行文件非空，macOS 与 Linux 构建结果具有执行权限；
-- 产物命名、数量和 SHA-256 内容准确；
-- 格式、类型、Clippy、Rust、Node.js、Vitest、Playwright 与 Actions 安全扫描全部通过。
+## Release Gates
 
-## 发布闸门
+Complete every gate before publishing.
 
-Draft Release 满足以下条件后才能公开。
+### Native smoke tests
 
-### 实机
+On clean Windows 11 x64 and Ubuntu 22.04 x64 systems, test:
 
-在 Windows 11 x64 和 Ubuntu 22.04 x64 干净环境逐项验证：
+- startup, shutdown, tray show/hide, and tray exit;
+- window dragging, resizing, and position restore;
+- status and low-quota notifications;
+- default paths, custom paths, and Codex CLI data ingestion;
+- no-data, unavailable-CLI, and network-failure states.
 
-- 启动和退出；
-- 托盘显示、隐藏和退出；
-- 窗口拖动、缩放和位置恢复；
-- 状态通知和低额度通知；
-- 默认路径、自定义路径和 Codex CLI 数据读取；
-- 无数据、CLI 不可用和网络失败状态。
+Record the OS, architecture, Codex CLI version, desktop environment, timestamp, and result. For Linux, also record X11 or Wayland. Browser tests do not replace native test records.
 
-记录系统版本、架构、Codex CLI 版本、桌面环境、验证时间和结果。CI 浏览器测试不能替代实机记录。
+### Signing
 
-### 签名
-
-Windows 使用 Authenticode 签名。`Get-AuthenticodeSignature` 的 `Status` 必须为 `Valid`。
-
-macOS 使用 Developer ID Application 签名并公证。以下检查必须成功：
+- Sign the Windows binary with Authenticode and require `Get-AuthenticodeSignature` to report `Valid`.
+- Sign each macOS binary with Developer ID Application and notarize it. Both commands below must pass.
 
 ```sh
 codesign --verify --strict --verbose=2 <artifact>
 spctl --assess --type execute --verbose=2 <artifact>
 ```
 
-签名和公证完成后重新生成对应 SHA-256。不得发布构建阶段生成的旧校验文件。
+Regenerate the affected SHA-256 files after signing and notarization.
 
-### 许可证
+### Licenses and package contents
 
-根据 `pnpm-lock.yaml`、`src-tauri/Cargo.lock` 和目标系统动态依赖生成生产依赖清单。逐项确认许可证兼容性、署名和许可证文本要求。复核 Release 文件不包含开发缓存、日志、配置或用户数据。
+Build the production dependency inventory from `pnpm-lock.yaml`, `src-tauri/Cargo.lock`, and each target's dynamic libraries. Verify license compatibility, required attribution, and license text. Confirm that release files contain no caches, logs, configuration, or user data.
 
-### 持续运行
+### Endurance
 
-Windows 11 x64 和 Ubuntu 22.04 x64 分别验证一小时前台运行和一小时托盘隐藏。覆盖空闲、持续刷新和记录更新。每分钟记录 CPU、内存和子进程数。确认预热后无持续增长，退出后无本次创建的 CLI 或 WebView 子进程。
+On both Windows 11 x64 and Ubuntu 22.04 x64, run one hour in the foreground and one hour hidden in the tray. Cover idle, continuous refresh, and record updates; capture CPU, memory, and child-process counts every minute. After warm-up, resources must not grow continuously. After exit, no CLI or WebView child process started by the app may remain.
 
-## 发布步骤
+## Procedure
 
-1. 更新三处版本及锁文件，运行 `pnpm verify` 和 `pnpm build`。
-2. 等待 GitHub 上四个 `CI` 构建全部通过。
-3. 创建与版本一致的签名 tag，例如 `git tag -s v0.1.0`，然后推送 tag。
-4. 等待 Draft Release 生成，完成实机、签名、公证、许可证和持续运行闸门。
-5. 用签名后的 Windows 和 macOS 文件替换 Draft 中的对应文件，并更新 SHA-256。
-6. 核对八个产物和 MIT `LICENSE`。在 Windows 和 Ubuntu 重新校验 SHA-256 与启动行为，并核对 Windows 和 macOS 签名结果。
-7. 公开 Draft Release。
+1. Update the version in `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`; update lockfiles.
+2. Run `pnpm verify` and `pnpm build`, then merge only after all four CI jobs pass.
+3. Create and push a signed matching tag, for example `git tag -s v0.1.0`.
+4. Wait for the draft Release, then complete the native, signing, license, package-content, and endurance gates.
+5. Replace the Windows and macOS draft assets with signed files and regenerate their checksums.
+6. Confirm the four binaries, four checksums, and `LICENSE`. Recheck checksums and startup on Windows and Ubuntu, plus Windows and macOS signatures.
+7. Publish the draft Release.
 
-Linux 产物在 Ubuntu 22.04 runner 构建，运行环境需要 WebKitGTK 4.1 与 AppIndicator。Wayland 下的置顶、全局位置和托盘能力取决于合成器，应按降级路径实测。
+The Linux binary targets Ubuntu 22.04 and requires WebKitGTK 4.1 and AppIndicator at runtime. Under Wayland, always-on-top, global positioning, and tray behavior depend on the compositor and must be tested with the supported fallback behavior.
