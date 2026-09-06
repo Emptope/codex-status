@@ -27,7 +27,7 @@ On clean systems for every supported target, test:
 - startup, shutdown, tray show/hide, and tray exit;
 - no taskbar entry on Windows or Linux and no Dock entry on macOS;
 - window dragging, resizing, and position restore;
-- status and low-quota notifications, including both configurable sound types and previews;
+- approval, completion, and low-quota notifications, including all three configurable sound types, previews, and off options;
 - default paths, custom paths, and Codex CLI data ingestion;
 - no-data, unavailable-CLI, and network-failure states.
 

@@ -57,7 +57,8 @@ const settings = {
   pinnedSession: null,
   selectedBucket: null,
   notifications: true,
-  completionSound: true,
+  approvalSound: 'bell',
+  completionSound: 'ding',
   quotaSound: 'alert',
   muted: false,
   lowQuota: 10,
@@ -419,16 +420,39 @@ test('settings controls align without text overlap', async ({ page }, testInfo) 
   });
 });
 
-test('task completion sound is enabled by default and configurable', async ({ page }) => {
+test('command approval sound can be previewed and disabled', async ({ page }) => {
+  await mockSound(page);
+  await page.reload({ waitUntil: 'networkidle' });
   await page.getByRole('button', { name: 'Settings' }).click();
-  const control = page.getByRole('checkbox', { name: 'Task completion sound' });
-  await expect(control).toBeChecked();
-  await control.uncheck();
+  const sound = page.getByRole('combobox', { name: 'Command approval sound' });
+  await expect(sound).toHaveValue('bell');
+  await page.getByRole('button', { name: 'Preview command approval sound' }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as typeof window & { __soundPlays?: number }).__soundPlays || 0),
+    )
+    .toBe(1);
+  await sound.selectOption('off');
+  await expect(page.getByRole('button', { name: 'Preview command approval sound' })).toBeDisabled();
   const request = page.waitForRequest(
     (request) => request.url().endsWith('/api/save_preferences') && request.method() === 'POST',
   );
   await page.getByRole('button', { name: 'Save', exact: true }).click();
-  expect((await request).postDataJSON().settings.completionSound).toBe(false);
+  expect((await request).postDataJSON().settings.approvalSound).toBe('off');
+});
+
+test('task completion sound is selectable and can be disabled', async ({ page }) => {
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const sound = page.getByRole('combobox', { name: 'Task completion sound' });
+  await expect(sound).toHaveValue('ding');
+  await sound.selectOption('bell');
+  await sound.selectOption('off');
+  await expect(page.getByRole('button', { name: 'Preview task completion sound' })).toBeDisabled();
+  const request = page.waitForRequest(
+    (request) => request.url().endsWith('/api/save_preferences') && request.method() === 'POST',
+  );
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  expect((await request).postDataJSON().settings.completionSound).toBe('off');
 });
 
 test('task completion sound can be previewed from settings', async ({ page }) => {
@@ -463,7 +487,7 @@ test('quota warning sound can be selected and previewed', async ({ page }) => {
   expect((await request).postDataJSON().settings.quotaSound).toBe('battery');
 });
 
-test('desktop completion events play the configured sound', async ({ page }) => {
+test('desktop approval and completion events play their configured sounds', async ({ page }) => {
   await mockSound(page);
   await mockNative(page);
   await page.reload({ waitUntil: 'networkidle' });
@@ -485,13 +509,25 @@ test('desktop completion events play the configured sound', async ({ page }) => 
       window as typeof window & {
         __emitNative: (event: string, payload: unknown) => void;
       }
-    ).__emitNative('play-sound', 'completion'),
+    ).__emitNative('play-sound', 'approvalBell'),
   );
   await expect
     .poll(() =>
       page.evaluate(() => (window as typeof window & { __soundPlays?: number }).__soundPlays || 0),
     )
     .toBe(1);
+  await page.evaluate(() =>
+    (
+      window as typeof window & {
+        __emitNative: (event: string, payload: unknown) => void;
+      }
+    ).__emitNative('play-sound', 'completionDing'),
+  );
+  await expect
+    .poll(() =>
+      page.evaluate(() => (window as typeof window & { __soundPlays?: number }).__soundPlays || 0),
+    )
+    .toBe(2);
 });
 
 test('large text, themes and degraded states remain readable', async ({ page }, testInfo) => {

@@ -1,6 +1,7 @@
 use super::{identity, text};
 use crate::status::{Activity, Event, Field, Quality, Quota, QuotaWindow, Session, Usage};
 use chrono::DateTime;
+use serde::Deserialize;
 use serde_json::Value;
 use std::{
     collections::BTreeMap,
@@ -98,6 +99,49 @@ fn session(root: &str, row: &Value) -> Option<Session> {
     ))
 }
 
+fn approval_argument(value: &Value) -> bool {
+    if value["sandbox_permissions"] == "require_escalated" {
+        return true;
+    }
+    let Some(source) = value.as_str() else {
+        return false;
+    };
+    if serde_json::from_str::<Value>(source)
+        .ok()
+        .is_some_and(|arguments| arguments["sandbox_permissions"] == "require_escalated")
+    {
+        return true;
+    }
+    const CALL: &str = "tools.exec_command(";
+    source.match_indices(CALL).any(|(index, _)| {
+        let mut deserializer = serde_json::Deserializer::from_str(&source[index + CALL.len()..]);
+        Value::deserialize(&mut deserializer)
+            .ok()
+            .is_some_and(|arguments| arguments["sandbox_permissions"] == "require_escalated")
+    })
+}
+
+fn approval_request(payload: &Value) -> Option<String> {
+    let supported = match payload["type"].as_str()? {
+        "custom_tool_call" => payload["name"] == "exec",
+        "function_call" => matches!(payload["name"].as_str(), Some("exec_command" | "exec")),
+        _ => false,
+    };
+    (supported
+        && (approval_argument(&payload["input"]) || approval_argument(&payload["arguments"])))
+    .then(|| text(&payload["call_id"], 256))
+    .flatten()
+}
+
+fn approval_response(payload: &Value) -> Option<String> {
+    matches!(
+        payload["type"].as_str(),
+        Some("custom_tool_call_output" | "function_call_output")
+    )
+    .then(|| text(&payload["call_id"], 256))
+    .flatten()
+}
+
 fn event(row: &Value) -> Option<Event> {
     let at = at(row)?;
     let payload = &row["payload"];
@@ -132,6 +176,11 @@ fn event(row: &Value) -> Option<Event> {
             }),
             _ => None,
         },
+        "response_item" => approval_request(payload)
+            .map(|request| Event::ApprovalRequested { at, request })
+            .or_else(|| {
+                approval_response(payload).map(|request| Event::ApprovalResolved { at, request })
+            }),
         _ => None,
     }
 }
@@ -452,6 +501,67 @@ mod tests {
         let parsed = session("/data", &row).expect("session metadata should be accepted");
 
         assert_eq!(parsed.path, "/work");
+    }
+
+    #[test]
+    fn command_approval_calls_and_outputs_become_session_events() {
+        let approval = json!({
+            "timestamp":"2026-09-05T00:00:02Z",
+            "type":"response_item",
+            "payload":{
+                "type":"custom_tool_call",
+                "name":"exec",
+                "call_id":"approval",
+                "input":"const result = await tools.exec_command({\"cmd\":\"build\",\"sandbox_permissions\":\"require_escalated\"});"
+            }
+        });
+        assert_eq!(
+            event(&approval),
+            Some(Event::ApprovalRequested {
+                at: 1_788_566_402_000,
+                request: "approval".into(),
+            })
+        );
+
+        let legacy = json!({
+            "timestamp":"2026-09-05T00:00:03Z",
+            "type":"response_item",
+            "payload":{
+                "type":"function_call",
+                "name":"exec_command",
+                "call_id":"legacy",
+                "arguments":"{\"cmd\":\"build\",\"sandbox_permissions\":\"require_escalated\"}"
+            }
+        });
+        assert!(matches!(
+            event(&legacy),
+            Some(Event::ApprovalRequested { request, .. }) if request == "legacy"
+        ));
+
+        let resolved = json!({
+            "timestamp":"2026-09-05T00:00:04Z",
+            "type":"response_item",
+            "payload":{"type":"custom_tool_call_output","call_id":"approval"}
+        });
+        assert!(matches!(
+            event(&resolved),
+            Some(Event::ApprovalResolved { request, .. }) if request == "approval"
+        ));
+    }
+
+    #[test]
+    fn command_text_that_mentions_escalation_is_not_an_approval_request() {
+        let row = json!({
+            "timestamp":"2026-09-05T00:00:02Z",
+            "type":"response_item",
+            "payload":{
+                "type":"custom_tool_call",
+                "name":"exec",
+                "call_id":"search",
+                "input":"const result = await tools.exec_command({\"cmd\":\"rg require_escalated .\"});"
+            }
+        });
+        assert_eq!(event(&row), None);
     }
 
     #[test]

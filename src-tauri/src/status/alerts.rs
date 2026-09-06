@@ -11,6 +11,7 @@ pub struct Alert {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AlertKind {
     Status,
+    Approval,
     Completion,
     Quota,
 }
@@ -32,7 +33,9 @@ impl Alerts {
             let previous = self.sessions.insert(session.id.clone(), current);
             if self.initialized && previous.is_some() && previous != Some(current) {
                 let alert = match session.activity.value {
-                    Some(Activity::WaitingApproval) => Some(("Approval needed", AlertKind::Status)),
+                    Some(Activity::WaitingApproval) => {
+                        Some(("Approval needed", AlertKind::Approval))
+                    }
                     Some(Activity::WaitingInput) => Some(("Input needed", AlertKind::Status)),
                     Some(Activity::Completed) => Some(("Task completed", AlertKind::Completion)),
                     Some(Activity::Failed) => Some(("Task failed", AlertKind::Status)),
@@ -118,6 +121,32 @@ mod tests {
         let alert = &tracker.observe(&snapshot, 10)[0];
         assert_eq!(alert.title, "Task completed");
         assert_eq!(alert.kind, AlertKind::Completion);
+        assert!(tracker.observe(&snapshot, 10).is_empty());
+    }
+
+    #[test]
+    fn waiting_for_command_approval_emits_an_approval_alert_once() {
+        let mut session = session();
+        session.apply(Event::TurnStarted {
+            at: 1,
+            turn: "turn".into(),
+        });
+        let mut snapshot = Snapshot {
+            sessions: vec![session],
+            ..Snapshot::default()
+        };
+        let mut tracker = Alerts::default();
+        assert!(tracker.observe(&snapshot, 10).is_empty());
+
+        snapshot.sessions[0].apply(Event::Waiting {
+            at: 2,
+            turn: Some("turn".into()),
+            activity: Activity::WaitingApproval,
+        });
+        let alerts = tracker.observe(&snapshot, 10);
+        assert_eq!(alerts.len(), 1);
+        assert_eq!(alerts[0].title, "Approval needed");
+        assert_eq!(alerts[0].kind, AlertKind::Approval);
         assert!(tracker.observe(&snapshot, 10).is_empty());
     }
 

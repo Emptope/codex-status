@@ -19,9 +19,9 @@
 
 Codex Status 显示本地会话、上下文用量、账户额度和状态通知。应用只读监听会话数据，并通过配置的 `codex app-server` 进程查询实时账户数据。
 
-新完成的任务默认播放内置的“叮”提示音，低额度告警可从两种内置音效中选择。可在设置的“Notifications”中选择、试听或关闭提示音。
+命令需要审批时默认播放内置铃声，新完成的任务默认播放内置“叮”提示音；完成提示和低额度告警均有备选音效。每类提示音都可在设置的“Notifications”中选择、试听或关闭。
 
-应用在 Windows 和 Linux 中仅保留系统托盘图标，在 macOS 中仅保留菜单栏图标，不会额外出现任务栏或 Dock 入口。取消勾选托盘中的 **Show / Hide** 可隐藏悬浮窗，且不会停止后台监听或提示音。关闭 Status notifications 并保持 Task completion sound 开启，即可只保留声音提示。
+应用在 Windows 和 Linux 中仅保留系统托盘图标，在 macOS 中仅保留菜单栏图标，不会额外出现任务栏或 Dock 入口。取消勾选托盘中的 **Show / Hide** 可隐藏悬浮窗，且不会停止后台监听或提示音。关闭 Status notifications 并为 Task completion sound 保留一种音效，即可只保留声音提示。
 
 应用默认从 `PATH` 查找 `codex`，并读取 `CODEX_HOME`，未设置时使用 `~/.codex`。可在设置中修改可执行文件和数据目录。
 

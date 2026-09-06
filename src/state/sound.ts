@@ -1,11 +1,16 @@
-import ding from '../assets/sounds/ding.mp3?url';
+import approvalBell from '../assets/sounds/approval-bell.mp3?url';
+import completionBell from '../assets/sounds/completion-bell.mp3?url';
+import completionDing from '../assets/sounds/completion-ding.mp3?url';
 import quotaAlert from '../assets/sounds/quota-alert.mp3?url';
 import quotaBattery from '../assets/sounds/quota-low-battery.mp3?url';
 
-export type Sound = 'completion' | 'quotaAlert' | 'quotaBattery';
+export type Sound =
+  'approvalBell' | 'completionBell' | 'completionDing' | 'quotaAlert' | 'quotaBattery';
 
 const players: Record<Sound, HTMLAudioElement> = {
-  completion: new Audio(ding),
+  approvalBell: new Audio(approvalBell),
+  completionBell: new Audio(completionBell),
+  completionDing: new Audio(completionDing),
   quotaAlert: new Audio(quotaAlert),
   quotaBattery: new Audio(quotaBattery),
 };

@@ -19,9 +19,9 @@
 
 Codex Status displays local sessions, context usage, account quotas, and status notifications. It watches session data without modifying it and queries the configured `codex app-server` process for live account data.
 
-Newly completed tasks play the bundled ding sound by default. Low-quota alerts can use either bundled warning sound. Sounds can be selected, previewed, or disabled under Notifications in Settings.
+Command approval requests play the bundled bell, and newly completed tasks play the bundled ding by default. Completion and low-quota alerts offer alternate sounds. Every sound can be selected, previewed, or disabled under Notifications in Settings.
 
-The app stays in the system tray on Windows and Linux and in the menu bar on macOS, without adding a taskbar or Dock entry. The tray's **Show / Hide** option can hide the card without stopping background monitoring or sounds. Turn off Status notifications while leaving Task completion sound enabled for sound-only alerts.
+The app stays in the system tray on Windows and Linux and in the menu bar on macOS, without adding a taskbar or Dock entry. The tray's **Show / Hide** option can hide the card without stopping background monitoring or sounds. Turn off Status notifications while leaving Task completion sound set to a tone for sound-only alerts.
 
 By default, it resolves `codex` from `PATH` and reads `CODEX_HOME`, falling back to `~/.codex`. The executable and data roots are configurable in the app.
 

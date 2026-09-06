@@ -15,7 +15,9 @@ const EVENT: &str = "play-sound";
 
 #[cfg(target_os = "macos")]
 struct Players {
-    completion: Option<Retained<NSSound>>,
+    approval_bell: Option<Retained<NSSound>>,
+    completion_bell: Option<Retained<NSSound>>,
+    completion_ding: Option<Retained<NSSound>>,
     quota_alert: Option<Retained<NSSound>>,
     quota_battery: Option<Retained<NSSound>>,
 }
@@ -32,7 +34,9 @@ impl Players {
                 })
         };
         Self {
-            completion: load("ding.mp3"),
+            approval_bell: load("approval-bell.mp3"),
+            completion_bell: load("completion-bell.mp3"),
+            completion_ding: load("completion-ding.mp3"),
             quota_alert: load("quota-alert.mp3"),
             quota_battery: load("quota-low-battery.mp3"),
         }
@@ -40,7 +44,9 @@ impl Players {
 
     fn play(&self, sound: Sound) -> bool {
         let player = match sound {
-            Sound::Completion => &self.completion,
+            Sound::ApprovalBell => &self.approval_bell,
+            Sound::CompletionBell => &self.completion_bell,
+            Sound::CompletionDing => &self.completion_ding,
             Sound::QuotaAlert => &self.quota_alert,
             Sound::QuotaBattery => &self.quota_battery,
         };

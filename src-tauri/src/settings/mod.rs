@@ -1,10 +1,72 @@
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize, Deserializer, Serialize,
+    de::{self, Visitor},
+};
 use std::{
-    fs,
+    fmt, fs,
     io::Write,
     path::{Path, PathBuf},
 };
 use tempfile::NamedTempFile;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ApprovalSound {
+    Off,
+    #[default]
+    Bell,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CompletionSound {
+    Off,
+    Bell,
+    #[default]
+    Ding,
+}
+
+impl<'de> Deserialize<'de> for CompletionSound {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct CompletionSoundVisitor;
+
+        impl Visitor<'_> for CompletionSoundVisitor {
+            type Value = CompletionSound;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("off, ding, bell, or a legacy boolean")
+            }
+
+            fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(if value {
+                    CompletionSound::Ding
+                } else {
+                    CompletionSound::Off
+                })
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                match value {
+                    "off" => Ok(CompletionSound::Off),
+                    "ding" => Ok(CompletionSound::Ding),
+                    "bell" => Ok(CompletionSound::Bell),
+                    _ => Err(E::unknown_variant(value, &["off", "ding", "bell"])),
+                }
+            }
+        }
+
+        deserializer.deserialize_any(CompletionSoundVisitor)
+    }
+}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -28,7 +90,8 @@ pub struct Settings {
     pub pinned_session: Option<String>,
     pub selected_bucket: Option<String>,
     pub notifications: bool,
-    pub completion_sound: bool,
+    pub approval_sound: ApprovalSound,
+    pub completion_sound: CompletionSound,
     pub quota_sound: QuotaSound,
     pub muted: bool,
     pub low_quota: u8,
@@ -48,7 +111,8 @@ impl Default for Settings {
             pinned_session: None,
             selected_bucket: None,
             notifications: true,
-            completion_sound: true,
+            approval_sound: ApprovalSound::Bell,
+            completion_sound: CompletionSound::Ding,
             quota_sound: QuotaSound::Alert,
             muted: false,
             low_quota: 10,
@@ -155,7 +219,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.json");
         let mut settings = Settings::default();
-        assert!(settings.completion_sound);
+        assert_eq!(settings.approval_sound, ApprovalSound::Bell);
+        assert_eq!(settings.completion_sound, CompletionSound::Ding);
         settings.save(&path).unwrap();
         settings.font_size = 15;
         settings.save(&path).unwrap();
@@ -168,12 +233,26 @@ mod tests {
     }
 
     #[test]
-    fn older_settings_enable_completion_sound_by_default() {
+    fn older_settings_enable_default_sounds() {
         let mut value = serde_json::to_value(Settings::default()).unwrap();
+        value.as_object_mut().unwrap().remove("approvalSound");
         value.as_object_mut().unwrap().remove("completionSound");
         value.as_object_mut().unwrap().remove("quotaSound");
         let settings = serde_json::from_value::<Settings>(value).unwrap();
-        assert!(settings.completion_sound);
+        assert_eq!(settings.approval_sound, ApprovalSound::Bell);
+        assert_eq!(settings.completion_sound, CompletionSound::Ding);
         assert_eq!(settings.quota_sound, QuotaSound::Alert);
+    }
+
+    #[test]
+    fn legacy_completion_boolean_is_migrated() {
+        let mut value = serde_json::to_value(Settings::default()).unwrap();
+        value["completionSound"] = serde_json::json!(true);
+        let enabled = serde_json::from_value::<Settings>(value.clone()).unwrap();
+        assert_eq!(enabled.completion_sound, CompletionSound::Ding);
+
+        value["completionSound"] = serde_json::json!(false);
+        let disabled = serde_json::from_value::<Settings>(value).unwrap();
+        assert_eq!(disabled.completion_sound, CompletionSound::Off);
     }
 }

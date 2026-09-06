@@ -82,19 +82,37 @@
     /></label
   >
   <div class="setting">
-    <span class="setting-label">Task completion sound</span>
-    <div class="setting-actions">
+    <span class="setting-label">Command approval sound</span>
+    <div class="setting-actions sound-choice">
       <button
         class="sound-preview"
         type="button"
-        aria-label="Preview task completion sound"
-        onclick={() => preview('completion')}><Volume2 size={14} /><span>Preview</span></button
+        disabled={draft.approvalSound === 'off'}
+        aria-label="Preview command approval sound"
+        onclick={() => preview('approvalBell')}><Volume2 size={14} /></button
       >
-      <input
-        type="checkbox"
-        aria-label="Task completion sound"
-        bind:checked={draft.completionSound}
-      />
+      <select aria-label="Command approval sound" bind:value={draft.approvalSound}
+        ><option value="off">Off</option><option value="bell">Bell</option></select
+      >
+    </div>
+  </div>
+  <div class="setting">
+    <span class="setting-label">Task completion sound</span>
+    <div class="setting-actions sound-choice">
+      <button
+        class="sound-preview"
+        type="button"
+        disabled={draft.completionSound === 'off'}
+        aria-label="Preview task completion sound"
+        onclick={() =>
+          preview(draft.completionSound === 'bell' ? 'completionBell' : 'completionDing')}
+        ><Volume2 size={14} /></button
+      >
+      <select aria-label="Task completion sound" bind:value={draft.completionSound}
+        ><option value="off">Off</option><option value="ding">Ding</option><option value="bell"
+          >Bell</option
+        ></select
+      >
     </div>
   </div>
   <div class="setting">

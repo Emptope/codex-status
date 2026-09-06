@@ -1,7 +1,7 @@
 mod sound;
 
 use crate::{
-    settings::{QuotaSound, Settings},
+    settings::{ApprovalSound, CompletionSound, QuotaSound, Settings},
     sources::Runtime,
     status::{
         Snapshot,
@@ -31,7 +31,9 @@ fn configure_presence(_app: &mut tauri::App) {}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum Sound {
-    Completion,
+    ApprovalBell,
+    CompletionBell,
+    CompletionDing,
     QuotaAlert,
     QuotaBattery,
 }
@@ -47,7 +49,15 @@ fn delivery(settings: &Settings, kind: AlertKind) -> Delivery {
         None
     } else {
         match kind {
-            AlertKind::Completion if settings.completion_sound => Some(Sound::Completion),
+            AlertKind::Approval => match settings.approval_sound {
+                ApprovalSound::Off => None,
+                ApprovalSound::Bell => Some(Sound::ApprovalBell),
+            },
+            AlertKind::Completion => match settings.completion_sound {
+                CompletionSound::Off => None,
+                CompletionSound::Bell => Some(Sound::CompletionBell),
+                CompletionSound::Ding => Some(Sound::CompletionDing),
+            },
             AlertKind::Quota => match settings.quota_sound {
                 QuotaSound::Off => None,
                 QuotaSound::Alert => Some(Sound::QuotaAlert),
@@ -400,15 +410,40 @@ mod tests {
             delivery(&settings, AlertKind::Completion),
             Delivery {
                 notification: false,
-                sound: Some(Sound::Completion),
+                sound: Some(Sound::CompletionDing),
             }
         );
         assert_eq!(delivery(&settings, AlertKind::Status).sound, None);
-        settings.completion_sound = false;
+        settings.completion_sound = CompletionSound::Bell;
+        assert_eq!(
+            delivery(&settings, AlertKind::Completion).sound,
+            Some(Sound::CompletionBell)
+        );
+        settings.completion_sound = CompletionSound::Off;
         assert_eq!(delivery(&settings, AlertKind::Completion).sound, None);
-        settings.completion_sound = true;
+        settings.completion_sound = CompletionSound::Ding;
         settings.muted = true;
         assert_eq!(delivery(&settings, AlertKind::Completion).sound, None);
+    }
+
+    #[test]
+    fn approval_sound_can_be_disabled_and_respects_mute() {
+        let mut settings = Settings {
+            notifications: false,
+            ..Settings::default()
+        };
+        assert_eq!(
+            delivery(&settings, AlertKind::Approval),
+            Delivery {
+                notification: false,
+                sound: Some(Sound::ApprovalBell),
+            }
+        );
+        settings.approval_sound = ApprovalSound::Off;
+        assert_eq!(delivery(&settings, AlertKind::Approval).sound, None);
+        settings.approval_sound = ApprovalSound::Bell;
+        settings.muted = true;
+        assert_eq!(delivery(&settings, AlertKind::Approval).sound, None);
     }
 
     #[test]

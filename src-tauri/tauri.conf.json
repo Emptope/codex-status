@@ -36,7 +36,9 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "../src/assets/sounds/ding.mp3": "sounds/ding.mp3",
+      "../src/assets/sounds/approval-bell.mp3": "sounds/approval-bell.mp3",
+      "../src/assets/sounds/completion-bell.mp3": "sounds/completion-bell.mp3",
+      "../src/assets/sounds/completion-ding.mp3": "sounds/completion-ding.mp3",
       "../src/assets/sounds/quota-alert.mp3": "sounds/quota-alert.mp3",
       "../src/assets/sounds/quota-low-battery.mp3": "sounds/quota-low-battery.mp3"
     }

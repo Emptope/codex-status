@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 pub mod alerts;
 
@@ -83,6 +84,14 @@ pub enum Event {
         turn: Option<String>,
         activity: Activity,
     },
+    ApprovalRequested {
+        at: i64,
+        request: String,
+    },
+    ApprovalResolved {
+        at: i64,
+        request: String,
+    },
     TurnEnded {
         at: i64,
         turn: String,
@@ -109,6 +118,8 @@ pub struct Session {
     pub duration_ms: Option<u64>,
     #[serde(skip)]
     pub turn_id: Option<String>,
+    #[serde(skip)]
+    pub approval_requests: BTreeSet<String>,
 }
 
 impl Session {
@@ -128,15 +139,23 @@ impl Session {
             turn_started_at: None,
             duration_ms: None,
             turn_id: None,
+            approval_requests: BTreeSet::new(),
         }
     }
 
     pub fn apply(&mut self, event: Event) {
+        if let Event::ApprovalResolved { request, .. } = &event
+            && !self.approval_requests.contains(request)
+        {
+            return;
+        }
         let at = match &event {
             Event::Context { at, .. }
             | Event::Usage { at, .. }
             | Event::TurnStarted { at, .. }
             | Event::Waiting { at, .. }
+            | Event::ApprovalRequested { at, .. }
+            | Event::ApprovalResolved { at, .. }
             | Event::TurnEnded { at, .. } => *at,
         };
         self.latest_at = self.latest_at.max(at);
@@ -178,6 +197,7 @@ impl Session {
                 self.turn_id = Some(turn);
                 self.turn_started_at = Some(at);
                 self.duration_ms = None;
+                self.approval_requests.clear();
                 self.activity.set(Activity::Running, at);
             }
             Event::Waiting { turn, activity, .. } => {
@@ -198,6 +218,32 @@ impl Session {
                 }
                 self.activity.set(activity, at);
             }
+            Event::ApprovalRequested { request, .. } => {
+                if self.turn_id.is_none()
+                    || self.activity.observed_at.is_some_and(|old| at < old)
+                    || matches!(
+                        self.activity.value,
+                        Some(Activity::Completed | Activity::Interrupted | Activity::Failed)
+                    )
+                {
+                    return;
+                }
+                if self.approval_requests.insert(request) {
+                    self.activity.set(Activity::WaitingApproval, at);
+                }
+            }
+            Event::ApprovalResolved { request, .. } => {
+                if self.activity.observed_at.is_some_and(|old| at < old)
+                    || !self.approval_requests.remove(&request)
+                {
+                    return;
+                }
+                if self.approval_requests.is_empty()
+                    && self.activity.value == Some(Activity::WaitingApproval)
+                {
+                    self.activity.set(Activity::Running, at);
+                }
+            }
             Event::TurnEnded {
                 turn,
                 activity,
@@ -214,6 +260,7 @@ impl Session {
                 }
                 self.turn_id = Some(turn);
                 self.duration_ms = duration_ms;
+                self.approval_requests.clear();
                 self.activity.set(activity, at);
             }
         }
@@ -350,5 +397,37 @@ mod tests {
             activity: Activity::WaitingInput,
         });
         assert_eq!(state.activity.value, Some(Activity::Failed));
+    }
+
+    #[test]
+    fn approval_requests_keep_a_turn_waiting_until_all_are_resolved() {
+        let mut state = session("/root");
+        state.apply(start(1, "current"));
+        state.apply(Event::ApprovalRequested {
+            at: 2,
+            request: "first".into(),
+        });
+        state.apply(Event::ApprovalRequested {
+            at: 3,
+            request: "second".into(),
+        });
+        assert_eq!(state.activity.value, Some(Activity::WaitingApproval));
+
+        state.apply(Event::ApprovalResolved {
+            at: 4,
+            request: "unrelated".into(),
+        });
+        assert_eq!(state.latest_at, 3);
+        state.apply(Event::ApprovalResolved {
+            at: 4,
+            request: "first".into(),
+        });
+        assert_eq!(state.activity.value, Some(Activity::WaitingApproval));
+        state.apply(Event::ApprovalResolved {
+            at: 5,
+            request: "second".into(),
+        });
+        assert_eq!(state.activity.value, Some(Activity::Running));
+        assert!(state.approval_requests.is_empty());
     }
 }
