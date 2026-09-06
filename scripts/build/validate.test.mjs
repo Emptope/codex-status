@@ -69,21 +69,14 @@ test('project versions and package names must agree', () => {
   );
 });
 
-test('artifact validation checks names, permissions, hashes, and the complete release set', async () => {
+test('artifact validation checks names, hashes, and the complete release set', async () => {
   const root = await mkdtemp(join(tmpdir(), 'release-check-'));
   try {
     for (const { platform, arch } of targets) await writeArtifact(root, platform, arch);
-    const linux = await verifyArtifact(root, metadata, 'linux', 'x64', {
-      requireExecutable: true,
-    });
+    const linux = await verifyArtifact(root, metadata, 'linux', 'x64');
     assert.equal(linux.name, 'status-v1.2.3-linux-x64');
     assert.equal((await verifyArtifacts(root, metadata)).length, 4);
 
-    await chmod(linux.path, 0o644);
-    await assert.rejects(
-      verifyArtifact(root, metadata, 'linux', 'x64', { requireExecutable: true }),
-      /not executable/,
-    );
     await writeFile(linux.checksumPath, `${'0'.repeat(64)}  ${linux.name}\n`);
     await assert.rejects(verifyArtifact(root, metadata, 'linux', 'x64'), /Checksum mismatch/);
     await writeFile(join(root, 'build', 'artifacts', 'unexpected'), 'extra');
@@ -92,3 +85,28 @@ test('artifact validation checks names, permissions, hashes, and the complete re
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test(
+  'POSIX release artifacts require executable permissions',
+  { skip: process.platform === 'win32' },
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), 'release-check-'));
+    const { platform, arch } = targets.find((item) => item.platform !== 'win32');
+    try {
+      const path = await writeArtifact(root, platform, arch);
+      await verifyArtifact(root, metadata, platform, arch, {
+        requireExecutable: true,
+      });
+
+      await chmod(path, 0o644);
+      await assert.rejects(
+        verifyArtifact(root, metadata, platform, arch, {
+          requireExecutable: true,
+        }),
+        /not executable/,
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
