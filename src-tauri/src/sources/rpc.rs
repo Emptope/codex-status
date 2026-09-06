@@ -75,7 +75,7 @@ pub fn quotas(value: &Value, at: i64) -> Vec<Quota> {
 
 impl Rpc {
     pub async fn start(executable: &str, root: Option<&str>) -> Result<Self, String> {
-        let mut command = executable::command(executable);
+        let mut command = executable::command(executable).await;
         command
             .args(["app-server", "--listen", "stdio://"])
             .stdin(Stdio::piped())

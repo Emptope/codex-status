@@ -3,7 +3,11 @@ use std::{
     ffi::{OsStr, OsString},
     path::{Path, PathBuf},
 };
+#[cfg(target_os = "macos")]
+use std::{process::Stdio, time::Duration};
 use tokio::process::Command;
+#[cfg(target_os = "macos")]
+use tokio::time::timeout;
 
 #[cfg(windows)]
 fn registered_paths() -> Vec<OsString> {
@@ -33,16 +37,51 @@ fn registered_paths() -> Vec<OsString> {
     Vec::new()
 }
 
-fn search_paths() -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-    for value in env::var_os("PATH").into_iter().chain(registered_paths()) {
-        for path in env::split_paths(&value) {
-            if !paths.contains(&path) {
-                paths.push(path);
-            }
+pub(super) fn extend_paths(paths: &mut Vec<PathBuf>, value: &OsStr) {
+    for path in env::split_paths(value) {
+        if !paths.contains(&path) {
+            paths.push(path);
         }
     }
+}
+
+fn inherited_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    for value in env::var_os("PATH").into_iter().chain(registered_paths()) {
+        extend_paths(&mut paths, &value);
+    }
     paths
+}
+
+#[cfg(target_os = "macos")]
+async fn login_paths() -> Vec<PathBuf> {
+    use std::os::unix::ffi::OsStringExt;
+
+    let shell = env::var_os("SHELL")
+        .filter(|path| Path::new(path).is_absolute() && Path::new(path).is_file())
+        .unwrap_or_else(|| OsString::from("/bin/zsh"));
+    let mut command = Command::new(shell);
+    command
+        .args(["-ilc", r#"printf '\000%s\000' "$PATH""#])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    let Ok(Ok(output)) = timeout(Duration::from_secs(5), command.output()).await else {
+        return Vec::new();
+    };
+    let Some(value) = marked_path(&output.stdout) else {
+        return Vec::new();
+    };
+    let mut paths = Vec::new();
+    extend_paths(&mut paths, &OsString::from_vec(value.to_vec()));
+    paths
+}
+
+#[cfg(any(target_os = "macos", test))]
+pub(super) fn marked_path(output: &[u8]) -> Option<&[u8]> {
+    let start = output.iter().position(|byte| *byte == 0)? + 1;
+    let end = output[start..].iter().position(|byte| *byte == 0)? + start;
+    Some(&output[start..end])
 }
 
 #[cfg(windows)]
@@ -60,7 +99,11 @@ fn executable_extensions() -> Vec<OsString> {
     Vec::new()
 }
 
-fn resolve_in(executable: &OsStr, paths: &[PathBuf], extensions: &[OsString]) -> Option<PathBuf> {
+pub(super) fn resolve_in(
+    executable: &OsStr,
+    paths: &[PathBuf],
+    extensions: &[OsString],
+) -> Option<PathBuf> {
     let requested = Path::new(executable);
     if requested.components().count() != 1 {
         return None;
@@ -84,8 +127,18 @@ fn resolve_in(executable: &OsStr, paths: &[PathBuf], extensions: &[OsString]) ->
     None
 }
 
-pub fn command(executable: &str) -> Command {
-    let paths = search_paths();
+pub async fn command(executable: &str) -> Command {
+    let paths = inherited_paths();
+    #[cfg(target_os = "macos")]
+    let paths = {
+        let mut paths = paths;
+        for path in login_paths().await {
+            if !paths.contains(&path) {
+                paths.push(path);
+            }
+        }
+        paths
+    };
     let program = resolve_in(OsStr::new(executable), &paths, &executable_extensions())
         .unwrap_or_else(|| PathBuf::from(executable));
     let mut command = Command::new(program);

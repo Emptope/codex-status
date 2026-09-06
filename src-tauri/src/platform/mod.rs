@@ -1,3 +1,5 @@
+mod sound;
+
 use crate::{
     settings::{QuotaSound, Settings},
     sources::Runtime,
@@ -17,8 +19,6 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 use tauri_plugin_notification::NotificationExt;
-
-const SOUND_EVENT: &str = "play-sound";
 
 #[cfg(target_os = "macos")]
 fn configure_presence(app: &mut tauri::App) {
@@ -280,7 +280,7 @@ pub fn run() {
                     for alert in alerts {
                         let delivery = delivery(&preferences, alert.kind);
                         if let Some(sound) = delivery.sound {
-                            let _ = handle.emit(SOUND_EVENT, sound);
+                            sound::play(&handle, sound);
                         }
                         if delivery.notification {
                             let _ = handle

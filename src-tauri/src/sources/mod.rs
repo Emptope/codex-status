@@ -1,6 +1,9 @@
 mod config;
 mod executable;
 mod local;
+#[cfg(test)]
+#[path = "tests.rs"]
+mod regression;
 mod rpc;
 
 use crate::{
@@ -27,6 +30,29 @@ enum QuotaSource {
     Rpc,
     Local,
     None,
+}
+
+#[derive(Default)]
+struct Changes {
+    paths: BTreeSet<PathBuf>,
+    reconcile: bool,
+}
+
+fn drain(receive: &mpsc::Receiver<notify::Result<notify::Event>>, lost: &AtomicBool) -> Changes {
+    let mut changes = Changes {
+        reconcile: lost.swap(false, Ordering::Relaxed),
+        ..Changes::default()
+    };
+    while let Ok(event) = receive.try_recv() {
+        match event {
+            Ok(event) => {
+                changes.reconcile |= event.need_rescan();
+                changes.paths.extend(event.paths);
+            }
+            Err(_) => changes.reconcile = true,
+        }
+    }
+    changes
 }
 
 fn account_mode(value: &Value) -> &'static str {
@@ -169,9 +195,13 @@ impl Runtime {
 
     fn watch(&self) {
         let (send, receive) = mpsc::sync_channel(1024);
+        let lost = Arc::new(AtomicBool::new(false));
+        let callback_lost = lost.clone();
         let mut watcher =
             notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-                let _ = send.try_send(event);
+                if matches!(send.try_send(event), Err(mpsc::TrySendError::Full(_))) {
+                    callback_lost.store(true, Ordering::Relaxed);
+                }
             })
             .ok();
         let mut roots: Vec<String> = Vec::new();
@@ -204,27 +234,28 @@ impl Runtime {
                 use_local_quotas = next_use_local_quotas;
                 dirty = true;
             }
-            let mut paths = BTreeSet::new();
-            while let Ok(event) = receive.try_recv() {
-                match event {
-                    Ok(event) => {
-                        paths.extend(event.paths);
+            let mut changes = drain(&receive, &lost);
+            changes.reconcile |= changes.paths.iter().any(|path| {
+                path.is_dir()
+                    || roots
+                        .iter()
+                        .any(|root| Path::new(root).join("sessions").as_path() == path.as_path())
+            });
+            dirty |= changes.reconcile || !changes.paths.is_empty();
+            if changes.reconcile {
+                local.reconcile(&roots, || self.stop.load(Ordering::Relaxed));
+                reconcile = Instant::now();
+            } else {
+                for path in changes.paths {
+                    if self.stop.load(Ordering::Relaxed) {
+                        return;
                     }
-                    Err(_) => {
-                        reconcile = Instant::now() - Duration::from_secs(60);
+                    if let Some(root) = roots
+                        .iter()
+                        .find(|root| path.starts_with(Path::new(root).join("sessions")))
+                    {
+                        local.update_until(&path, root, &|| self.stop.load(Ordering::Relaxed));
                     }
-                }
-            }
-            dirty |= !paths.is_empty();
-            for path in paths {
-                if self.stop.load(Ordering::Relaxed) {
-                    return;
-                }
-                if let Some(root) = roots
-                    .iter()
-                    .find(|root| path.starts_with(Path::new(root).join("sessions")))
-                {
-                    local.update_until(&path, root, &|| self.stop.load(Ordering::Relaxed));
                 }
             }
             if reconcile.elapsed() >= Duration::from_secs(60) {
