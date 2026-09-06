@@ -1,7 +1,7 @@
 use super::executable::marked_path;
 use super::{
     drain,
-    executable::{extend_paths, resolve_in},
+    executable::{application_dirs_in, combine_paths, extend_paths, resolve_in},
     local::Local,
 };
 use crate::status::Activity;
@@ -35,6 +35,43 @@ fn discovered_paths_extend_sparse_gui_environments() {
     assert_eq!(
         resolve_in(OsStr::new("tool"), &paths, &[]),
         Some(user.join("tool"))
+    );
+}
+
+#[test]
+fn discovered_paths_preserve_the_user_environment_precedence() {
+    let root = tempfile::tempdir().unwrap();
+    let inherited = root.path().join("inherited");
+    let discovered = root.path().join("discovered");
+    fs::create_dir_all(&inherited).unwrap();
+    fs::create_dir_all(&discovered).unwrap();
+    fs::write(inherited.join("tool"), b"inherited").unwrap();
+    fs::write(discovered.join("tool"), b"discovered").unwrap();
+
+    let paths = combine_paths(vec![discovered.clone()], vec![inherited]);
+
+    assert_eq!(
+        resolve_in(OsStr::new("tool"), &paths, &[]),
+        Some(discovered.join("tool"))
+    );
+}
+
+#[test]
+fn application_resources_are_executable_search_candidates() {
+    let root = tempfile::tempdir().unwrap();
+    let resources = root
+        .path()
+        .join("Desktop.app")
+        .join("Contents")
+        .join("Resources");
+    fs::create_dir_all(&resources).unwrap();
+    fs::write(resources.join("tool"), b"tool").unwrap();
+
+    let paths = application_dirs_in(OsStr::new("tool"), &[root.path().to_owned()]);
+
+    assert_eq!(
+        resolve_in(OsStr::new("tool"), &paths, &[]),
+        Some(resources.join("tool"))
     );
 }
 

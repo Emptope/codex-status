@@ -53,6 +53,51 @@ fn inherited_paths() -> Vec<PathBuf> {
     paths
 }
 
+#[cfg(any(target_os = "macos", test))]
+pub(super) fn combine_paths(mut primary: Vec<PathBuf>, fallback: Vec<PathBuf>) -> Vec<PathBuf> {
+    for path in fallback {
+        if !primary.contains(&path) {
+            primary.push(path);
+        }
+    }
+    primary
+}
+
+#[cfg(target_os = "macos")]
+fn application_dirs(executable: &OsStr) -> Vec<PathBuf> {
+    let mut roots = vec![PathBuf::from("/Applications")];
+    if let Some(home) = env::var_os("HOME") {
+        roots.push(PathBuf::from(home).join("Applications"));
+    }
+    application_dirs_in(executable, &roots)
+}
+
+#[cfg(any(target_os = "macos", test))]
+pub(super) fn application_dirs_in(executable: &OsStr, roots: &[PathBuf]) -> Vec<PathBuf> {
+    if Path::new(executable).components().count() != 1 {
+        return Vec::new();
+    }
+    let mut paths = Vec::new();
+    for root in roots {
+        let Ok(entries) = std::fs::read_dir(root) else {
+            continue;
+        };
+        let mut bundles: Vec<PathBuf> = entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().is_some_and(|extension| extension == "app"))
+            .collect();
+        bundles.sort();
+        for bundle in bundles {
+            let resources = bundle.join("Contents").join("Resources");
+            if resources.join(executable).is_file() && !paths.contains(&resources) {
+                paths.push(resources);
+            }
+        }
+    }
+    paths
+}
+
 #[cfg(target_os = "macos")]
 async fn login_paths() -> Vec<PathBuf> {
     use std::os::unix::ffi::OsStringExt;
@@ -128,17 +173,14 @@ pub(super) fn resolve_in(
 }
 
 pub async fn command(executable: &str) -> Command {
-    let paths = inherited_paths();
+    let inherited = inherited_paths();
     #[cfg(target_os = "macos")]
-    let paths = {
-        let mut paths = paths;
-        for path in login_paths().await {
-            if !paths.contains(&path) {
-                paths.push(path);
-            }
-        }
-        paths
-    };
+    let paths = combine_paths(
+        combine_paths(login_paths().await, inherited),
+        application_dirs(OsStr::new(executable)),
+    );
+    #[cfg(not(target_os = "macos"))]
+    let paths = inherited;
     let program = resolve_in(OsStr::new(executable), &paths, &executable_extensions())
         .unwrap_or_else(|| PathBuf::from(executable));
     let mut command = Command::new(program);
