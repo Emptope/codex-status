@@ -59,6 +59,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential curl file libayatana-appindicator3-dev libssl-dev libwebkit2gtk-4.1-dev libxdo-dev librsvg2-dev patchelf wget
       - name: Validate runner
+        shell: bash
         env:
           EXPECTED_PLATFORM: ${{ inputs.runtime }}
           EXPECTED_ARCH: ${{ inputs.arch }}
@@ -77,6 +78,7 @@ jobs:
         run: pnpm build
       - name: Validate artifact
         id: artifact
+        shell: bash
         env:
           EXPECTED_PLATFORM: ${{ inputs.runtime }}
           EXPECTED_ARCH: ${{ inputs.arch }}

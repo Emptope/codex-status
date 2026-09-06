@@ -6,8 +6,8 @@
 | ----------- | ---------------- | ------------------------------------- |
 | Windows x64 | `windows-latest` | `codex-status-vX.Y.Z-windows-x64.exe` |
 | Linux x64   | `ubuntu-22.04`   | `codex-status-vX.Y.Z-linux-x64`       |
-| macOS x64   | `macos-15`       | `codex-status-vX.Y.Z-macos-x64`       |
-| macOS arm64 | `macos-15-arm64` | `codex-status-vX.Y.Z-macos-arm64`     |
+| macOS x64   | `macos-15-intel` | `codex-status-vX.Y.Z-macos-x64`       |
+| macOS arm64 | `macos-15`       | `codex-status-vX.Y.Z-macos-arm64`     |
 
 提交和 PR 由 `CI` 工作流执行四个目标的构建检查。`vX.Y.Z` tag 触发相同构建流程，并创建包含八个产物和 MIT `LICENSE` 的 Draft Release。工作流不公开 Release。
 
