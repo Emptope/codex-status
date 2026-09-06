@@ -12,7 +12,6 @@ const snapshot = {
   sessions: [
     {
       id: 'root:session',
-      rootId: 'root',
       path: '/workspace/a-project-with-a-long-but-readable-name',
       project: 'a-project-with-a-long-but-readable-name',
       activity: field('running'),
@@ -123,6 +122,7 @@ test('summary, details, sessions and settings remain operable', async ({ page })
   await expect(brand).toHaveAttribute('src', /icon(?:-[\w-]+)?\.svg/);
   await expect(page.locator('.session-button svg')).toHaveCount(0);
   await expect(page.getByText('64%')).toBeVisible();
+  await expect(page.locator('.text-tool span')).toHaveText('1 session');
   await page.getByRole('button', { name: /a-project-with/ }).click();
   await expect(page.getByText('Token usage')).toBeVisible();
   await page.getByRole('button', { name: 'Session list' }).click();

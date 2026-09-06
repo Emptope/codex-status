@@ -95,7 +95,6 @@ pub enum Event {
 #[serde(rename_all = "camelCase")]
 pub struct Session {
     pub id: String,
-    pub root_id: String,
     pub path: String,
     pub project: String,
     pub activity: Field<Activity>,
@@ -113,10 +112,9 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn new(id: String, root_id: String, path: String, project: String) -> Self {
+    pub fn new(id: String, path: String, project: String) -> Self {
         Self {
             id,
-            root_id,
             path,
             project,
             activity: Field::absent("local", Quality::Unavailable),
@@ -279,7 +277,6 @@ mod tests {
     fn session(root: &str) -> Session {
         Session::new(
             format!("{root}:one"),
-            root.into(),
             "/work/project".into(),
             "project".into(),
         )

@@ -44,7 +44,7 @@ export const error: Record<string, string> = {
   'source-write-failed': 'Source unavailable',
   'unsupported-method': 'CLI method unavailable',
 };
-function unit(value: number, name: string): string {
+export function unit(value: number, name: string): string {
   return `${value} ${name}${value === 1 ? '' : 's'}`;
 }
 export function duration(minutes: number | null): string {

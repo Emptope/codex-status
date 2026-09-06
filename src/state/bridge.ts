@@ -37,9 +37,7 @@ export async function drag() {
   if (native) await getCurrentWindow().startDragging();
 }
 export async function resizeHeight(height: number) {
-  if (!native) return false;
-  await command('resize', { width: innerWidth, height });
-  return true;
+  if (native) await command('resize', { width: innerWidth, height });
 }
 export async function fit(width: number, height: number) {
   if (native) await command('resize', { width, height });

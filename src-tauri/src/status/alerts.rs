@@ -91,7 +91,6 @@ mod tests {
     fn session() -> Session {
         Session::new(
             "root:session".into(),
-            "root".into(),
             "/work/project".into(),
             "project".into(),
         )

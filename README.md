@@ -1,6 +1,15 @@
-# Codex Status
+<p align="center">
+  <img src="assets/icon.png" width="96" height="96" alt="Codex Status 图标">
+</p>
 
-一个小巧的跨平台 Codex 状态悬浮窗，采用极简、平面化界面，集中显示额度、会话活动及需要处理的状态。
+<h1 align="center">Codex Status</h1>
+
+<p align="center">一个小巧的跨平台 Codex 状态悬浮窗</p>
+
+<p align="center">
+  <img src="assets/overview-light.png" width="300" alt="Codex Status Light 配色">
+  <img src="assets/overview-dark.png" width="300" alt="Codex Status Dark 配色">
+</p>
 
 ## 使用
 
@@ -16,7 +25,7 @@ macOS 和 Linux 下载后需要添加执行权限：
 chmod +x codex-status-vX.Y.Z-<platform>-<arch>
 ```
 
-应用默认查找 PATH 中的 `codex` 和用户数据目录，也可在设置中指定可执行文件与数据根。应用直接使用当前 CLI 提供的数据，不固定 CLI 版本。
+应用默认查找 PATH 中的 `codex` 和用户数据目录。可在设置中指定可执行文件和数据目录。
 
 ## 开发
 
@@ -28,4 +37,10 @@ pnpm verify
 pnpm build
 ```
 
-`pnpm build` 在 `build/artifacts` 生成当前平台的版本化可执行文件及 SHA-256。Windows 可通过 `./scripts/build/windows.ps1 verify|build|dev` 加载 Visual Studio 构建环境。完整发布闸门见 [docs/RELEASE.md](docs/RELEASE.md)。
+`pnpm build` 在 `build/artifacts` 生成版本化可执行文件和 SHA-256。Windows 使用 `./scripts/build/windows.ps1 verify|build|dev`。
+
+## 文档
+
+[发布](docs/RELEASE.md)
+
+[MIT License](LICENSE)

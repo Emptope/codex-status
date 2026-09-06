@@ -93,7 +93,6 @@ fn session(root: &str, row: &Value) -> Option<Session> {
     let root_id = identity(root);
     Some(Session::new(
         format!("{root_id}:{session_id}"),
-        root_id,
         path,
         project,
     ))

@@ -13,7 +13,7 @@
     BellOff,
   } from '@lucide/svelte';
   import { empty, defaults, type Snapshot, type Settings } from '../types/status';
-  import { activity, connectionLabel, percent } from '../state/format';
+  import { activity, connectionLabel, percent, unit } from '../state/format';
   import { command, drag, fit, native, resizeHeight, save, subscribe } from '../state/bridge';
   import Quota from './Quota.svelte';
   import Details from './Details.svelte';
@@ -276,7 +276,7 @@
         aria-pressed={view === 'sessions'}
         onclick={() => {
           showView(view === 'sessions' ? 'summary' : 'sessions');
-        }}><Users size={14} /><span>{snapshot.sessions.length} sessions</span></button
+        }}><Users size={14} /><span>{unit(snapshot.sessions.length, 'session')}</span></button
       ><span
         class="connection"
         class:warning={snapshot.connection !== 'connected'}

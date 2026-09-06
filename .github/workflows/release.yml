@@ -54,8 +54,8 @@ jobs:
       runtime: ${{ matrix.runtime }}
       arch: ${{ matrix.arch }}
 
-  publish:
-    name: Publish GitHub release
+  draft:
+    name: Create draft GitHub release
     needs: build
     runs-on: ubuntu-22.04
     permissions:
@@ -79,7 +79,7 @@ jobs:
           rustup default 1.98.0
       - name: Validate release set
         run: node scripts/build/validate.mjs artifacts
-      - name: Publish
+      - name: Create draft
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" build/artifacts/* --verify-tag --generate-notes --title "Codex Status $GITHUB_REF_NAME"
+        run: gh release create "$GITHUB_REF_NAME" build/artifacts/* LICENSE --draft --verify-tag --generate-notes --title "Codex Status $GITHUB_REF_NAME"

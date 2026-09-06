@@ -22,7 +22,6 @@ export interface Usage {
 }
 export interface Session {
   id: string;
-  rootId: string;
   path: string;
   project: string;
   activity: Field<Activity>;
