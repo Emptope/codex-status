@@ -1,9 +1,8 @@
-import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readdir, stat } from 'node:fs/promises';
 import { homedir, platform, release } from 'node:os';
 import { join, resolve } from 'node:path';
-import { promisify, parseArgs } from 'node:util';
+import { parseArgs } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Rpc } from './rpc.mjs';
 import { Cursor, summarize, quota, account } from './records.mjs';
@@ -28,7 +27,6 @@ const report = {
     wsl: !!process.env.WSL_DISTRO_NAME,
     rootId: hash(root),
   },
-  cliVersion: null,
   rpc: { status: 'notRun' },
   local: { files: 0, bytesRead: 0, invalidLines: 0, limited: false, sessions: [] },
 };
@@ -89,24 +87,13 @@ if (seconds) {
   }
 }
 report.local.sessions = watched
-  .filter((file) => file.state?.version)
+  .filter((file) => file.state?.session)
   .map((file, index) => ({
     fileId: hash(file.path),
     ...file.state,
     turnId: file.state.turnId ? hash(file.state.turnId) : null,
     changedDuringObservation: before[index] !== file.state.observedAt,
   }));
-
-try {
-  const version = await promisify(execFile)(values.executable, ['--version'], {
-    timeout: 5000,
-    maxBuffer: 16384,
-    windowsHide: true,
-  });
-  report.cliVersion = version.stdout.match(/\b\d+\.\d+\.\d+\b/)?.[0] || null;
-} catch {
-  report.cliVersion = null;
-}
 
 if (!values['local-only']) {
   const rpc = Rpc.start(values.executable, { ...process.env, CODEX_HOME: root });

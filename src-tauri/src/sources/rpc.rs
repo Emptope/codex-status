@@ -106,7 +106,9 @@ impl Rpc {
 
     pub async fn call(&mut self, method: &str) -> Result<Value, String> {
         let params = match method {
-            "initialize" => json!({"clientInfo":{"name":"codex_status","version":"0.1.0"}}),
+            "initialize" => {
+                json!({"clientInfo":{"name":"codex_status","version":env!("CARGO_PKG_VERSION")}})
+            }
             "account/read" => json!({"refreshToken":false}),
             "account/rateLimits/read" => json!({}),
             _ => return Err("forbidden-method".into()),
@@ -165,25 +167,6 @@ impl Rpc {
         let _ = self.child.start_kill();
         let _ = timeout(Duration::from_secs(1), self.child.wait()).await;
     }
-}
-
-pub async fn version(executable: &str) -> Option<String> {
-    let mut command = executable::command(executable);
-    command
-        .arg("--version")
-        .kill_on_drop(true)
-        .stderr(Stdio::null());
-    #[cfg(windows)]
-    command.creation_flags(0x08000000);
-    let output = timeout(Duration::from_secs(5), command.output())
-        .await
-        .ok()?
-        .ok()?;
-    String::from_utf8(output.stdout)
-        .ok()?
-        .split_whitespace()
-        .find(|v| v.split('.').count() == 3 && v.chars().all(|c| c.is_ascii_digit() || c == '.'))
-        .map(str::to_owned)
 }
 
 #[cfg(test)]

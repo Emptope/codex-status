@@ -1,9 +1,10 @@
 import { spawn } from 'node:child_process';
+import manifest from '../../package.json' with { type: 'json' };
 
 export function request(method, params = {}) {
   switch (method) {
     case 'initialize':
-      return { clientInfo: { name: 'codex_status_probe', version: '0.1.0' } };
+      return { clientInfo: { name: 'codex_status_probe', version: manifest.version } };
     case 'account/read':
       return { refreshToken: false };
     case 'account/rateLimits/read':

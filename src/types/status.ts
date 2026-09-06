@@ -25,8 +25,6 @@ export interface Session {
   rootId: string;
   path: string;
   project: string;
-  version: string;
-  supported: boolean;
   activity: Field<Activity>;
   model: Field<string>;
   effort: Field<string>;
@@ -57,14 +55,12 @@ export interface Snapshot {
   connection: string;
   account: string;
   provider: string | null;
-  version: string | null;
   updatedAt: number | null;
   error: string | null;
   localError: string | null;
   refreshing: boolean;
 }
 export interface Settings {
-  schema: number;
   roots: string[];
   executable: string;
   theme: string;
@@ -86,14 +82,12 @@ export const empty: Snapshot = {
   connection: 'connecting',
   account: 'unknown',
   provider: null,
-  version: null,
   updatedAt: null,
   error: null,
   localError: null,
   refreshing: false,
 };
 export const defaults: Settings = {
-  schema: 1,
   roots: [],
   executable: 'codex',
   theme: 'system',

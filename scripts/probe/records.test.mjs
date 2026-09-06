@@ -33,7 +33,6 @@ test('only explicit terminal events establish status; token snapshots replace', 
       type: 'session_meta',
       payload: {
         id: 'id',
-        cli_version: '0.153.4',
         originator: 'codex-tui',
         instructions: 'secret',
       },
@@ -74,11 +73,7 @@ test('only explicit terminal events establish status; token snapshots replace', 
   assert.equal('contextPercent' in state, false);
   assert.equal(summarize(rows.slice(0, 2)).status, 'running');
   assert.equal(summarize([rows[0]]).status, 'unknown');
-  assert.equal(
-    summarize([{ ...rows[0], payload: { ...rows[0].payload, cli_version: '99.0.0' } }, rows[1]])
-      .status,
-    'unknown',
-  );
+  assert.equal(summarize([rows[0], rows[1]]).status, 'running');
 });
 
 test('incremental reading handles partial UTF-8, corrupt lines, truncation and replacement', async () => {

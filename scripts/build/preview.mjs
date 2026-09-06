@@ -16,7 +16,6 @@ export function preview() {
         connection: 'connecting',
         account: 'unknown',
         provider: null,
-        version: null,
         updatedAt: null,
         error: null,
         localError: null,
@@ -24,7 +23,6 @@ export function preview() {
       };
       const settingsPath = join(root, 'build', 'preview-settings.json');
       const defaults = {
-        schema: 1,
         roots: [],
         executable: 'codex',
         theme: 'system',

@@ -1,6 +1,5 @@
 import { open } from 'node:fs/promises';
 
-export const supportedVersions = new Set(['0.153.4']);
 const numeric = (value) => (Number.isSafeInteger(value) && value >= 0 ? value : null);
 
 export function account(result) {
@@ -38,8 +37,7 @@ export function summarize(rows, previous) {
   const state = previous
     ? structuredClone(previous)
     : {
-        version: null,
-        supported: false,
+        session: false,
         status: 'unknown',
         observedAt: null,
         statusAt: null,
@@ -54,14 +52,10 @@ export function summarize(rows, previous) {
     const p = row.payload;
     if (!p || typeof p !== 'object') continue;
     if (row.type === 'session_meta') {
-      state.version =
-        typeof p.cli_version === 'string' && /^\d+\.\d+\.\d+$/.test(p.cli_version)
-          ? p.cli_version
-          : null;
-      state.supported = supportedVersions.has(state.version);
+      state.session = typeof p.id === 'string' && p.id.length > 0;
       continue;
     }
-    if (!state.supported) continue;
+    if (!state.session) continue;
     const at = Date.parse(row.timestamp);
     if (!Number.isFinite(at)) continue;
     const observed = new Date(at).toISOString();

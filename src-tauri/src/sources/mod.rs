@@ -22,12 +22,6 @@ use std::{
 };
 use tokio::{sync::Notify, task::JoinHandle};
 
-const SUPPORTED_VERSIONS: &[&str] = &["0.153.4"];
-
-fn supported(version: &str) -> bool {
-    SUPPORTED_VERSIONS.contains(&version)
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum QuotaSource {
     Rpc,
@@ -183,7 +177,9 @@ impl Runtime {
         let mut roots: Vec<String> = Vec::new();
         let mut local = local::Local::default();
         let mut reconcile = Instant::now() - Duration::from_secs(60);
+        let mut use_local_quotas = false;
         while !self.stop.load(Ordering::Relaxed) {
+            let mut dirty = false;
             let preferences = self.preferences();
             if roots != preferences.roots {
                 if let Some(watcher) = watcher.as_mut() {
@@ -198,6 +194,15 @@ impl Runtime {
                 roots = preferences.roots;
                 local = local::Local::default();
                 reconcile = Instant::now() - Duration::from_secs(60);
+                dirty = true;
+            }
+            let next_use_local_quotas = {
+                let state = self.state.lock().unwrap();
+                quota_source(&state.account) == QuotaSource::Local
+            };
+            if use_local_quotas != next_use_local_quotas {
+                use_local_quotas = next_use_local_quotas;
+                dirty = true;
             }
             let mut paths = BTreeSet::new();
             while let Ok(event) = receive.try_recv() {
@@ -210,6 +215,7 @@ impl Runtime {
                     }
                 }
             }
+            dirty |= !paths.is_empty();
             for path in paths {
                 if self.stop.load(Ordering::Relaxed) {
                     return;
@@ -224,20 +230,23 @@ impl Runtime {
             if reconcile.elapsed() >= Duration::from_secs(60) {
                 local.reconcile(&roots, || self.stop.load(Ordering::Relaxed));
                 reconcile = Instant::now();
+                dirty = true;
             }
-            let sessions = local.snapshot();
-            let local_error = local.error.clone();
-            let (quotas, observed_at) = local.quotas(roots.first().map(String::as_str));
-            self.publish(move |state| {
-                state.sessions = sessions;
-                state.local_error = local_error;
-                if quota_source(&state.account) == QuotaSource::Local {
-                    state.quotas = quotas;
-                    if observed_at.is_some() {
-                        state.updated_at = observed_at;
+            if dirty {
+                let sessions = local.snapshot();
+                let local_error = local.error.clone();
+                let (quotas, observed_at) = local.quotas(roots.first().map(String::as_str));
+                self.publish(move |state| {
+                    state.sessions = sessions;
+                    state.local_error = local_error;
+                    if use_local_quotas {
+                        state.quotas = quotas;
+                        if observed_at.is_some() {
+                            state.updated_at = observed_at;
+                        }
                     }
-                }
-            });
+                });
+            }
             std::thread::sleep(Duration::from_millis(250));
         }
     }
@@ -247,8 +256,8 @@ impl Runtime {
         let mut configuration = None;
         let mut failures: u32 = 0;
         let mut auth_paused = false;
-        let mut last_query = Instant::now() - Duration::from_secs(60);
-        'query: loop {
+        let mut last_query;
+        loop {
             if self.stop.load(Ordering::Relaxed) {
                 break;
             }
@@ -258,9 +267,7 @@ impl Runtime {
                 if let Some(rpc) = client.take() {
                     rpc::Rpc::close(rpc).await;
                 }
-                let version = rpc::version(&settings.executable).await;
                 self.publish(|state| {
-                    state.version = version.clone();
                     state.quotas.clear();
                     state.account = "unknown".into();
                     state.provider = None;
@@ -276,90 +283,79 @@ impl Runtime {
                 }
                 continue;
             }
-            let current_version = self.snapshot().version;
-            let known = current_version.as_deref().is_some_and(supported);
             self.publish(|state| {
-                state.refreshing = known;
-                state.connection = if known {
-                    "connecting"
-                } else if current_version.is_some() {
-                    "unsupported"
-                } else {
-                    "unavailable"
-                }
-                .into();
+                state.refreshing = true;
+                state.connection = "connecting".into();
             });
-            if known {
-                let operation = async {
-                    if client.is_none() {
-                        client = Some(
-                            rpc::Rpc::start(
-                                &settings.executable,
-                                settings.roots.first().map(String::as_str),
-                            )
-                            .await?,
-                        );
-                    }
-                    let rpc = client.as_mut().ok_or("source-unavailable")?;
-                    let account = rpc.call("account/read").await?;
-                    let mode = account_mode(&account);
-                    let quota_source = quota_source(mode);
-                    let provider = (mode == "externalProvider")
-                        .then(|| config::provider(settings.roots.first().map(String::as_str)))
-                        .flatten();
+            let operation = async {
+                if client.is_none() {
+                    client = Some(
+                        rpc::Rpc::start(
+                            &settings.executable,
+                            settings.roots.first().map(String::as_str),
+                        )
+                        .await?,
+                    );
+                }
+                let rpc = client.as_mut().ok_or("source-unavailable")?;
+                let account = rpc.call("account/read").await?;
+                let mode = account_mode(&account);
+                let quota_source = quota_source(mode);
+                let provider = (mode == "externalProvider")
+                    .then(|| config::provider(settings.roots.first().map(String::as_str)))
+                    .flatten();
+                self.publish(|state| {
+                    state.account = mode.into();
+                    state.provider = provider;
+                });
+                if quota_source != QuotaSource::Rpc {
                     self.publish(|state| {
-                        state.account = mode.into();
-                        state.provider = provider;
-                    });
-                    if quota_source != QuotaSource::Rpc {
-                        self.publish(|state| {
-                            if quota_source == QuotaSource::None {
-                                state.quotas.clear();
-                            }
-                            state.connection = mode.into();
-                            state.error = None;
-                            if quota_source == QuotaSource::None {
-                                state.updated_at = Some(chrono::Utc::now().timestamp_millis());
-                            }
-                        });
-                        if mode == "signedOut" {
-                            auth_paused = true;
+                        if quota_source == QuotaSource::None {
+                            state.quotas.clear();
                         }
-                        return Ok::<(), String>(());
-                    }
-                    let limits = rpc.call("account/rateLimits/read").await?;
-                    let now = chrono::Utc::now().timestamp_millis();
-                    self.publish(|state| {
-                        state.quotas = rpc::quotas(&limits, now);
-                        state.connection = "connected".into();
+                        state.connection = mode.into();
                         state.error = None;
-                        state.updated_at = Some(now);
+                        if quota_source == QuotaSource::None {
+                            state.updated_at = Some(chrono::Utc::now().timestamp_millis());
+                        }
                     });
-                    Ok(())
-                };
-                let result = tokio::select! { result = operation => result, _ = self.shutdown.notified() => break };
-                if let Err(error) = result {
-                    failures = failures.saturating_add(1);
-                    if error == "auth-required" {
+                    if mode == "signedOut" {
                         auth_paused = true;
                     }
-                    self.publish(|state| {
-                        state.connection = "offline".into();
-                        state.error = Some(error);
-                        for bucket in &mut state.quotas {
-                            for window in &mut bucket.windows {
-                                if window.remaining.value.is_some() {
-                                    window.remaining.quality = Quality::Stale;
-                                }
+                    return Ok::<(), String>(());
+                }
+                let limits = rpc.call("account/rateLimits/read").await?;
+                let now = chrono::Utc::now().timestamp_millis();
+                self.publish(|state| {
+                    state.quotas = rpc::quotas(&limits, now);
+                    state.connection = "connected".into();
+                    state.error = None;
+                    state.updated_at = Some(now);
+                });
+                Ok(())
+            };
+            let result = tokio::select! { result = operation => result, _ = self.shutdown.notified() => break };
+            if let Err(error) = result {
+                failures = failures.saturating_add(1);
+                if error == "auth-required" {
+                    auth_paused = true;
+                }
+                self.publish(|state| {
+                    state.connection = "offline".into();
+                    state.error = Some(error);
+                    for bucket in &mut state.quotas {
+                        for window in &mut bucket.windows {
+                            if window.remaining.value.is_some() {
+                                window.remaining.quality = Quality::Stale;
                             }
                         }
-                    });
-                    if let Some(rpc) = client.take() {
-                        rpc.close().await;
                     }
-                } else {
-                    failures = 0;
+                });
+                if let Some(rpc) = client.take() {
+                    rpc.close().await;
                 }
+            } else {
+                failures = 0;
             }
             self.publish(|state| {
                 state.refreshing = false;
@@ -370,35 +366,38 @@ impl Runtime {
             let interval = if failures > 0 {
                 (5_u64.saturating_mul(2_u64.saturating_pow(failures.min(6)))).min(300)
                     + (chrono::Utc::now().timestamp_subsec_millis() % 4) as u64
-            } else if self.hidden.load(Ordering::Relaxed) || !known {
+            } else if self.hidden.load(Ordering::Relaxed) {
                 180
             } else {
                 60
             };
-            last_query = last_query.max(Instant::now());
-            let deadline = Instant::now() + Duration::from_secs(interval);
-            loop {
-                self.publish(|state| {
-                    let now = chrono::Utc::now().timestamp_millis();
-                    for bucket in &mut state.quotas {
-                        for window in &mut bucket.windows {
-                            if window.resets_at.is_some_and(|at| at <= now)
-                                && window.remaining.value.is_some()
-                            {
-                                window.remaining.quality = Quality::Stale;
-                            }
-                        }
+            last_query = Instant::now();
+            let manually_refreshed = tokio::select! {
+                _ = self.shutdown.notified() => break,
+                _ = self.refresh.notified() => true,
+                _ = tokio::time::sleep(Duration::from_secs(interval)) => false,
+            };
+            if manually_refreshed {
+                let throttle = Duration::from_secs(3).saturating_sub(last_query.elapsed());
+                if !throttle.is_zero() {
+                    tokio::select! {
+                        _ = self.shutdown.notified() => break,
+                        _ = tokio::time::sleep(throttle) => {}
                     }
-                });
-                let refresh = tokio::select! {
-                    _ = self.shutdown.notified() => break 'query,
-                    _ = self.refresh.notified() => true,
-                    _ = tokio::time::sleep(Duration::from_secs(1)) => Instant::now() >= deadline,
-                };
-                if refresh && last_query.elapsed() >= Duration::from_secs(3) {
-                    break;
                 }
             }
+            self.publish(|state| {
+                let now = chrono::Utc::now().timestamp_millis();
+                for bucket in &mut state.quotas {
+                    for window in &mut bucket.windows {
+                        if window.resets_at.is_some_and(|at| at <= now)
+                            && window.remaining.value.is_some()
+                        {
+                            window.remaining.quality = Quality::Stale;
+                        }
+                    }
+                }
+            });
         }
         if let Some(rpc) = client {
             rpc.close().await;

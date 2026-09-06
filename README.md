@@ -16,7 +16,7 @@ macOS 和 Linux 下载后需要添加执行权限：
 chmod +x codex-status-vX.Y.Z-<platform>-<arch>
 ```
 
-应用默认查找 PATH 中的 `codex` 和用户数据目录，也可在设置中指定可执行文件与数据根。当前兼容 Codex CLI `0.153.4`；其他版本会明确显示为不支持。
+应用默认查找 PATH 中的 `codex` 和用户数据目录，也可在设置中指定可执行文件与数据根。应用直接使用当前 CLI 提供的数据，不固定 CLI 版本。
 
 ## 开发
 

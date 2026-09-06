@@ -15,7 +15,7 @@ export const connection: Record<string, string> = {
   connected: 'Connected',
   offline: 'Offline',
   unavailable: 'CLI not found',
-  unsupported: 'Unsupported version',
+  unsupported: 'Unsupported account',
   signedOut: 'Signed out',
   apiKey: 'API key',
   externalProvider: 'External provider',
@@ -42,7 +42,7 @@ export const error: Record<string, string> = {
   'source-start-failed': 'Could not start CLI',
   'source-unreadable': 'Data source unavailable',
   'source-write-failed': 'Source unavailable',
-  'unsupported-method': 'Unsupported CLI version',
+  'unsupported-method': 'CLI method unavailable',
 };
 function unit(value: number, name: string): string {
   return `${value} ${name}${value === 1 ? '' : 's'}`;

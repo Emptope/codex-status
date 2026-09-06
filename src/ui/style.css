@@ -601,6 +601,10 @@ textarea {
   gap: 5px;
 }
 
+.collapsed-row > strong {
+  padding-left: 4px;
+}
+
 .collapsed-row .numeric {
   white-space: nowrap;
 }

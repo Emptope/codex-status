@@ -72,8 +72,6 @@
   <dl>
     <dt>Source</dt>
     <dd>Local CLI</dd>
-    <dt>Version</dt>
-    <dd>{snapshot.version || 'Unknown'}</dd>
     <dt>Connection</dt>
     <dd>{connection[snapshot.connection] || snapshot.connection}</dd>
     <dt>Authentication</dt>

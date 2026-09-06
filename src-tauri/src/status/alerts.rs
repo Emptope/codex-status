@@ -94,8 +94,6 @@ mod tests {
             "root".into(),
             "/work/project".into(),
             "project".into(),
-            "0.153.4".into(),
-            true,
         )
     }
 

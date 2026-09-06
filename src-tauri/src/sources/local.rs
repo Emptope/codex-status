@@ -1,4 +1,4 @@
-use super::{identity, supported, text};
+use super::{identity, text};
 use crate::status::{Activity, Event, Field, Quality, Quota, QuotaWindow, Session, Usage};
 use chrono::DateTime;
 use serde_json::Value;
@@ -13,6 +13,7 @@ use walkdir::WalkDir;
 
 const CHUNK: usize = 256 * 1024;
 const MAX_LINE: usize = 1024 * 1024;
+const RETAINED_LINE: usize = 16 * 1024;
 
 fn at(row: &Value) -> Option<i64> {
     row["timestamp"]
@@ -84,7 +85,6 @@ fn session(root: &str, row: &Value) -> Option<Session> {
     }
     let payload = &row["payload"];
     let session_id = text(&payload["id"], 256)?;
-    let version = text(&payload["cli_version"], 32)?;
     let path = text(&payload["cwd"], 4096).unwrap_or_default();
     let project = Path::new(&path)
         .file_name()
@@ -96,8 +96,6 @@ fn session(root: &str, row: &Value) -> Option<Session> {
         root_id,
         path,
         project,
-        version.clone(),
-        supported(&version),
     ))
 }
 
@@ -150,6 +148,13 @@ pub struct Cursor {
 }
 
 impl Cursor {
+    fn clear_partial(&mut self) {
+        self.partial.clear();
+        if self.partial.capacity() > RETAINED_LINE {
+            self.partial.shrink_to(RETAINED_LINE);
+        }
+    }
+
     pub fn read(&mut self, path: &Path) -> std::io::Result<(Vec<Value>, bool, bool)> {
         let mut file = File::open(path)?;
         let metadata = file.metadata()?;
@@ -170,7 +175,7 @@ impl Cursor {
                 && metadata.modified().ok() != self.modified);
         if reset {
             self.offset = 0;
-            self.partial.clear();
+            self.partial = Vec::new();
             self.discarding = false;
             self.prefix.clear();
         }
@@ -193,11 +198,11 @@ impl Cursor {
                 {
                     rows.push(row);
                 }
-                self.partial.clear();
+                self.clear_partial();
                 self.discarding = false;
             } else if !self.discarding {
                 if self.partial.len() >= MAX_LINE {
-                    self.partial.clear();
+                    self.clear_partial();
                     self.discarding = true;
                 } else {
                     self.partial.push(*byte);
@@ -364,7 +369,7 @@ impl Local {
     }
 
     pub fn snapshot(&self) -> Vec<Session> {
-        let mut sessions: Vec<_> = self
+        let mut sessions: Vec<&Session> = self
             .sessions
             .values()
             .filter(|session| {
@@ -372,11 +377,10 @@ impl Local {
                 // Paths owned by another configured runtime cannot be verified on this host.
                 !path.is_absolute() || path.is_dir()
             })
-            .cloned()
             .collect();
         sessions.sort_by(|a, b| b.latest_at.cmp(&a.latest_at).then_with(|| a.id.cmp(&b.id)));
         sessions.truncate(50);
-        sessions
+        sessions.into_iter().cloned().collect()
     }
 
     pub fn quotas(&self, root: Option<&str>) -> (Vec<Quota>, Option<i64>) {
@@ -432,6 +436,26 @@ mod tests {
     }
 
     #[test]
+    fn cursor_releases_completed_large_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("record");
+        let payload = "a".repeat(RETAINED_LINE * 8);
+        fs::write(&path, format!("{{\"ignored\":\"{payload}\"}}\n")).unwrap();
+
+        let mut cursor = Cursor::default();
+        assert_eq!(cursor.read(&path).unwrap().0.len(), 1);
+        assert!(cursor.partial.capacity() <= RETAINED_LINE);
+    }
+
+    #[test]
+    fn session_metadata_has_no_version_gate() {
+        let row = json!({"type":"session_meta","payload":{"id":"id","cwd":"/work"}});
+        let parsed = session("/data", &row).expect("session metadata should be accepted");
+
+        assert_eq!(parsed.path, "/work");
+    }
+
+    #[test]
     fn adapter_separates_roots_and_ignores_unverified_statuses() {
         let directory = tempfile::tempdir().unwrap();
         let first = directory.path().join("first");
@@ -440,7 +464,7 @@ mod tests {
         let two = directory.path().join("work/two");
         fs::create_dir_all(&one).unwrap();
         fs::create_dir_all(&two).unwrap();
-        let meta = |path: &str| json!({"type":"session_meta","payload":{"id":"same","cwd":path,"cli_version":"0.153.4","instructions":"private"}});
+        let meta = |path: &str| json!({"type":"session_meta","payload":{"id":"same","cwd":path,"instructions":"private"}});
         let unknown = json!({"timestamp":"2026-09-05T00:00:01Z","type":"event_msg","payload":{"type":"unverified_status","status":"failed"}});
         fs::write(
             &first,
@@ -474,7 +498,8 @@ mod tests {
         let missing = root.path().join("missing");
         fs::create_dir(&records).unwrap();
         fs::create_dir(&available).unwrap();
-        let meta = |id: &str, path: &Path| json!({"type":"session_meta","payload":{"id":id,"cwd":path,"cli_version":"0.153.4"}});
+        let meta =
+            |id: &str, path: &Path| json!({"type":"session_meta","payload":{"id":id,"cwd":path}});
         let available_record = records.join("available.jsonl");
         let missing_record = records.join("missing.jsonl");
         fs::write(
@@ -515,7 +540,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let first = directory.path().join("first");
         let second = directory.path().join("second");
-        let meta = json!({"type":"session_meta","payload":{"id":"id","cwd":"/work","cli_version":"0.153.4"}});
+        let meta = json!({"type":"session_meta","payload":{"id":"id","cwd":"/work"}});
         let current = json!({"timestamp":"2026-09-05T00:00:02Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","limit_name":null,"primary":{"used_percent":75,"window_minutes":300,"resets_at":200},"secondary":null,"credits":{"balance":"4","unlimited":false}}}});
         let old = json!({"timestamp":"2026-09-05T00:00:01Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":5,"window_minutes":60,"resets_at":100}}}});
         let other = json!({"timestamp":"2026-09-05T00:00:03Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":10,"window_minutes":30,"resets_at":300}}}});

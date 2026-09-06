@@ -9,7 +9,6 @@ use tempfile::NamedTempFile;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct Settings {
-    pub schema: u32,
     pub roots: Vec<String>,
     pub executable: String,
     pub theme: String,
@@ -28,7 +27,6 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            schema: 1,
             roots: vec![default_root().to_string_lossy().into_owned()],
             executable: "codex".into(),
             theme: "system".into(),
@@ -59,8 +57,7 @@ pub fn default_root() -> PathBuf {
 
 impl Settings {
     pub fn validate(&self) -> Result<(), String> {
-        if self.schema != 1
-            || self.roots.len() > 8
+        if self.roots.len() > 8
             || self
                 .roots
                 .iter()

@@ -15,8 +15,6 @@ const snapshot = {
       rootId: 'root',
       path: '/workspace/a-project-with-a-long-but-readable-name',
       project: 'a-project-with-a-long-but-readable-name',
-      version: '0.153.4',
-      supported: true,
       activity: field('running'),
       model: field('gpt-5'),
       effort: field('high'),
@@ -44,14 +42,12 @@ const snapshot = {
   connection: 'connected',
   account: 'chatgpt',
   provider: null,
-  version: '0.153.4',
   updatedAt: now,
   error: null,
   localError: null,
   refreshing: false,
 };
 const settings = {
-  schema: 1,
   roots: ['/data/root'],
   executable: 'codex',
   theme: 'system',
@@ -277,12 +273,18 @@ test('an expanded panel fills a window resized from its native edge', async ({
   });
 });
 
-test('collapsed mode has stable controls and no horizontal overflow', async ({ page }) => {
+test('collapsed mode has stable controls and no horizontal overflow', async ({
+  page,
+}, testInfo) => {
   await page.getByRole('button', { name: 'Collapse' }).click();
-  await expect(page.locator('.collapsed-row img, .collapsed-row svg')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Expand' })).toBeVisible();
+  await expect(page.locator('.collapsed-row img')).toHaveCount(0);
+  const expand = page.getByRole('button', { name: 'Expand' });
+  await expect(expand).toBeVisible();
+  await expect(expand.locator('svg')).toHaveCount(1);
+  await expect(page.locator('.collapsed-row > strong')).toHaveCSS('padding-left', '4px');
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
   expect(overflow).toBeLessThanOrEqual(0);
+  await page.screenshot({ path: `build/screenshots/collapsed-${testInfo.project.name}.png` });
 });
 
 test('session history stays compact and scrolls inside the card', async ({ page }, testInfo) => {

@@ -98,8 +98,6 @@ pub struct Session {
     pub root_id: String,
     pub path: String,
     pub project: String,
-    pub version: String,
-    pub supported: bool,
     pub activity: Field<Activity>,
     pub model: Field<String>,
     pub effort: Field<String>,
@@ -115,32 +113,18 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn new(
-        id: String,
-        root_id: String,
-        path: String,
-        project: String,
-        version: String,
-        supported: bool,
-    ) -> Self {
-        let quality = if supported {
-            Quality::Unavailable
-        } else {
-            Quality::Unsupported
-        };
+    pub fn new(id: String, root_id: String, path: String, project: String) -> Self {
         Self {
             id,
             root_id,
             path,
             project,
-            version,
-            supported,
-            activity: Field::absent("local", quality),
-            model: Field::absent("local", quality),
-            effort: Field::absent("local", quality),
-            usage: Field::absent("local", quality),
-            last_usage: Field::absent("local", quality),
-            context_limit: Field::absent("local", quality),
+            activity: Field::absent("local", Quality::Unavailable),
+            model: Field::absent("local", Quality::Unavailable),
+            effort: Field::absent("local", Quality::Unavailable),
+            usage: Field::absent("local", Quality::Unavailable),
+            last_usage: Field::absent("local", Quality::Unavailable),
+            context_limit: Field::absent("local", Quality::Unavailable),
             context_used: Field::absent("local", Quality::Unsupported),
             latest_at: 0,
             turn_started_at: None,
@@ -150,9 +134,6 @@ impl Session {
     }
 
     pub fn apply(&mut self, event: Event) {
-        if !self.supported {
-            return;
-        }
         let at = match &event {
             Event::Context { at, .. }
             | Event::Usage { at, .. }
@@ -268,7 +249,6 @@ pub struct Snapshot {
     pub connection: String,
     pub account: String,
     pub provider: Option<String>,
-    pub version: Option<String>,
     pub updated_at: Option<i64>,
     pub error: Option<String>,
     pub local_error: Option<String>,
@@ -284,7 +264,6 @@ impl Default for Snapshot {
             connection: "connecting".into(),
             account: "unknown".into(),
             provider: None,
-            version: None,
             updated_at: None,
             error: None,
             local_error: None,
@@ -303,8 +282,6 @@ mod tests {
             root.into(),
             "/work/project".into(),
             "project".into(),
-            "0.153.4".into(),
-            true,
         )
     }
     fn start(at: i64, turn: &str) -> Event {
