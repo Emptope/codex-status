@@ -1,6 +1,7 @@
 {
   "name": "codex-status",
   "version": "0.1.0",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.25.0",
@@ -14,7 +15,7 @@
     "verify": "node scripts/build/tasks.mjs verify",
     "build": "node scripts/build/tasks.mjs build",
     "dev": "node scripts/build/tasks.mjs dev",
-    "lint:actions": "uvx --from zizmor==1.30.0 zizmor .github/workflows",
+    "lint:actions": "uvx --from zizmor==1.30.0 zizmor --offline --strict-collection .github/workflows",
     "preview": "node scripts/build/tasks.mjs preview",
     "probe": "node scripts/probe/main.mjs",
     "format": "prettier --write .github src scripts tests package.json vite.config.ts vitest.config.ts playwright.config.ts svelte.config.js tsconfig.json"

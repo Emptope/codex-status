@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
-import { start } from './process.mjs';
+import { packageInvocation, start } from './process.mjs';
 
 async function waitForExit(pid) {
   let state = null;
@@ -65,4 +65,23 @@ test('an unexpected non-zero exit remains a failure', async () => {
     stdio: 'ignore',
   });
   await assert.rejects(job.done, /exited 7/);
+});
+
+test('package commands work with and without an inherited package manager entry', () => {
+  assert.deepEqual(
+    packageInvocation(['exec', 'tool'], {
+      entry: '/tools/manager.cjs',
+      platform: 'linux',
+      executable: '/bin/node',
+    }),
+    { command: '/bin/node', args: ['/tools/manager.cjs', 'exec', 'tool'] },
+  );
+  assert.deepEqual(packageInvocation(['exec', 'tool'], { entry: '', platform: 'linux' }), {
+    command: 'pnpm',
+    args: ['exec', 'tool'],
+  });
+  assert.deepEqual(packageInvocation(['exec', 'tool'], { entry: '', platform: 'win32' }), {
+    command: 'pnpm.cmd',
+    args: ['exec', 'tool'],
+  });
 });

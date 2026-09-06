@@ -9,8 +9,13 @@ function run(args) {
   });
 }
 
+const port = Number(process.argv[2]);
+if (!Number.isSafeInteger(port) || port < 1024 || port > 65_535) {
+  throw new Error('A valid test server port is required');
+}
+
 await run(['exec', 'vite', 'build']).done;
-const server = run(['exec', 'vite', 'preview', '--host', '127.0.0.1', '--port', '1420']);
+const server = run(['exec', 'vite', 'preview', '--host', '127.0.0.1', '--port', String(port)]);
 const stop = () => void server.stop();
 process.once('SIGINT', stop);
 process.once('SIGTERM', stop);

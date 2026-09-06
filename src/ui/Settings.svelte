@@ -39,28 +39,47 @@
 <form onsubmit={submit}>
   <h2>Appearance</h2>
   <label class="setting"
-    >Theme<select bind:value={draft.theme}
+    ><span class="setting-label">Theme</span><select bind:value={draft.theme}
       ><option value="system">System</option><option value="light">Light</option><option
         value="dark">Dark</option
       ></select
     ></label
   >
   <label class="setting"
-    >Font size<input type="number" min="12" max="18" bind:value={draft.fontSize} /></label
+    ><span class="setting-label">Font size</span><input
+      type="number"
+      min="12"
+      max="18"
+      bind:value={draft.fontSize}
+    /></label
   >
   <label class="setting"
-    >Always on top<input type="checkbox" bind:checked={draft.alwaysOnTop} /></label
+    ><span class="setting-label">Always on top</span><input
+      type="checkbox"
+      bind:checked={draft.alwaysOnTop}
+    /></label
   >
   <label class="setting"
-    >Follow recent activity<input type="checkbox" bind:checked={draft.autoFollow} /></label
+    ><span class="setting-label">Follow recent activity</span><input
+      type="checkbox"
+      bind:checked={draft.autoFollow}
+    /></label
   >
   <h2>Notifications</h2>
   <label class="setting"
-    >Status notifications<input type="checkbox" bind:checked={draft.notifications} /></label
+    ><span class="setting-label">Status notifications</span><input
+      type="checkbox"
+      bind:checked={draft.notifications}
+    /></label
   >
-  <label class="setting">Muted<input type="checkbox" bind:checked={draft.muted} /></label>
   <label class="setting"
-    >Low quota threshold %<input
+    ><span class="setting-label">Muted</span><input
+      type="checkbox"
+      bind:checked={draft.muted}
+    /></label
+  >
+  <label class="setting"
+    ><span class="setting-label">Low quota threshold %</span><input
       type="number"
       min="0"
       max="100"
@@ -69,7 +88,7 @@
   >
   <h2>Data sources</h2>
   <label class="stack"
-    >CLI executable<input
+    ><span>CLI executable</span><input
       bind:value={draft.executable}
       required
       maxlength="4096"
@@ -77,7 +96,7 @@
     /></label
   >
   <label class="stack"
-    >Data roots<textarea
+    ><span>Data roots</span><textarea
       bind:value={roots}
       rows="3"
       spellcheck="false"

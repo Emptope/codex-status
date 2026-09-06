@@ -82,7 +82,9 @@ async function mockNative(page: Page) {
   await page.addInitScript(
     ({ snapshot, settings }) => {
       let callbackId = 0;
+      type Invocation = { command: string; args: Record<string, unknown> };
       Object.defineProperty(globalThis, 'isTauri', { value: true, configurable: true });
+      Object.assign(window, { __nativeInvocations: [] as Invocation[] });
       Object.defineProperty(window, '__TAURI_INTERNALS__', {
         configurable: true,
         value: {
@@ -95,7 +97,12 @@ async function mockNative(page: Page) {
           unregisterCallback(id: number) {
             delete (window as unknown as Record<string, unknown>)[`_${id}`];
           },
-          async invoke(command: string) {
+          async invoke(command: string, args: Record<string, unknown> = {}) {
+            (
+              window as typeof window & {
+                __nativeInvocations: Invocation[];
+              }
+            ).__nativeInvocations.push({ command, args });
             if (command === 'snapshot') return snapshot;
             if (command === 'preferences') return settings;
             if (command === 'plugin:event|listen') return ++callbackId;
@@ -115,6 +122,10 @@ test.beforeEach(async ({ page }) => {
 });
 
 test('summary, details, sessions and settings remain operable', async ({ page }) => {
+  const brand = page.locator('header .brand-icon');
+  await expect(brand).toBeVisible();
+  await expect(brand).toHaveAttribute('src', /icon(?:-[\w-]+)?\.svg/);
+  await expect(page.locator('.session-button svg')).toHaveCount(0);
   await expect(page.getByText('64%')).toBeVisible();
   await page.getByRole('button', { name: /a-project-with/ }).click();
   await expect(page.getByText('Token usage')).toBeVisible();
@@ -136,6 +147,100 @@ test('the expanded card exposes a draggable bottom resize edge', async ({ page }
   await expect(edge).toBeVisible();
   await expect(edge).toHaveCSS('cursor', 'ns-resize');
   await expect(edge).toHaveAttribute('data-no-drag', '');
+});
+
+test('native views request their own widths and bottom dragging changes only height', async ({
+  page,
+}) => {
+  await mockNative(page);
+  await page.setViewportSize({ width: 300, height: 400 });
+  await page.reload({ waitUntil: 'networkidle' });
+
+  await page.getByRole('button', { name: 'Session list' }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const calls = (
+          window as typeof window & {
+            __nativeInvocations: Array<{
+              command: string;
+              args: Record<string, unknown>;
+            }>;
+          }
+        ).__nativeInvocations;
+        return calls
+          .slice()
+          .reverse()
+          .find((call) => call.command === 'resize')?.args.width;
+      }),
+    )
+    .toBe(380);
+
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const calls = (
+          window as typeof window & {
+            __nativeInvocations: Array<{
+              command: string;
+              args: Record<string, unknown>;
+            }>;
+          }
+        ).__nativeInvocations;
+        return calls
+          .slice()
+          .reverse()
+          .find((call) => call.command === 'resize')?.args.width;
+      }),
+    )
+    .toBe(400);
+
+  await page.getByRole('button', { name: 'Close panel' }).click();
+  const before = await page.evaluate(
+    () =>
+      (
+        window as typeof window & {
+          __nativeInvocations: unknown[];
+        }
+      ).__nativeInvocations.length,
+  );
+  const edge = page.getByRole('separator', { name: 'Resize height' });
+  const box = await edge.boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2 + 40);
+  await page.mouse.up();
+
+  await expect
+    .poll(() =>
+      page.evaluate((before) => {
+        const calls = (
+          window as typeof window & {
+            __nativeInvocations: Array<{
+              command: string;
+              args: Record<string, unknown>;
+            }>;
+          }
+        ).__nativeInvocations.slice(before);
+        return calls.some(
+          (call) =>
+            call.command === 'resize' &&
+            call.args.width === innerWidth &&
+            Number(call.args.height) > innerHeight,
+        );
+      }, before),
+    )
+    .toBe(true);
+  const nativeCalls = await page.evaluate(() =>
+    (
+      window as typeof window & {
+        __nativeInvocations: Array<{ command: string }>;
+      }
+    ).__nativeInvocations.map((call) => call.command),
+  );
+  expect(nativeCalls).not.toContain('plugin:window|start_resize_dragging');
 });
 
 test('an expanded panel fills a window resized from its native edge', async ({
@@ -174,6 +279,7 @@ test('an expanded panel fills a window resized from its native edge', async ({
 
 test('collapsed mode has stable controls and no horizontal overflow', async ({ page }) => {
   await page.getByRole('button', { name: 'Collapse' }).click();
+  await expect(page.locator('.collapsed-row img, .collapsed-row svg')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Expand' })).toBeVisible();
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
   expect(overflow).toBeLessThanOrEqual(0);
@@ -195,31 +301,42 @@ test('session history stays compact and scrolls inside the card', async ({ page 
           id: `root:session-${index}`,
           project: `project-${index}`,
           path: `/workspace/project-${index}`,
+          activity: field(index % 2 === 0 ? 'running' : 'waitingApproval'),
           latestAt: now - index * 60_000,
         })),
       },
     }),
   );
-  await page.setViewportSize({ width: 360, height: 504 });
+  const width = testInfo.project.name === 'narrow' ? 240 : 380;
+  await page.setViewportSize({ width, height: 504 });
   await page.reload({ waitUntil: 'networkidle' });
   await page.getByRole('button', { name: 'Session list' }).click();
 
   const layout = await page.evaluate(() => ({
     cardHeight: document.querySelector('main')!.getBoundingClientRect().height,
     pageOverflow: document.documentElement.scrollHeight - innerHeight,
+    pageWidthOverflow: document.documentElement.scrollWidth - innerWidth,
     listOverflow:
       document.querySelector('.scroll-view')!.scrollHeight -
       document.querySelector('.scroll-view')!.clientHeight,
+    statusRights: [...document.querySelectorAll('.session-status')].map(
+      (status) => status.getBoundingClientRect().right,
+    ),
   }));
   expect(layout.cardHeight).toBeLessThanOrEqual(480);
   expect(layout.pageOverflow).toBeLessThanOrEqual(0);
+  expect(layout.pageWidthOverflow).toBeLessThanOrEqual(0);
   expect(layout.listOverflow).toBeGreaterThan(0);
+  expect(Math.max(...layout.statusRights) - Math.min(...layout.statusRights)).toBeLessThanOrEqual(
+    1,
+  );
+  await expect(page.locator('.session-item svg')).toHaveCount(0);
   await page.screenshot({
     path: `build/screenshots/sessions-${testInfo.project.name}.png`,
     fullPage: true,
   });
 
-  await page.setViewportSize({ width: 360, height: 320 });
+  await page.setViewportSize({ width, height: 320 });
   const compact = await page.evaluate(() => ({
     cardHeight: document.querySelector('main')!.getBoundingClientRect().height,
     pageOverflow: document.documentElement.scrollHeight - innerHeight,
@@ -230,6 +347,33 @@ test('session history stays compact and scrolls inside the card', async ({ page 
   expect(compact.cardHeight).toBeLessThanOrEqual(320);
   expect(compact.pageOverflow).toBeLessThanOrEqual(0);
   expect(compact.listOverflow).toBeGreaterThan(0);
+});
+
+test('settings controls align without text overlap', async ({ page }, testInfo) => {
+  const width = testInfo.project.name === 'narrow' ? 240 : 400;
+  await page.setViewportSize({ width, height: 620 });
+  await page.getByRole('button', { name: 'Settings' }).click();
+
+  const layout = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('.setting')].map((row) => {
+      const label = row.querySelector('.setting-label')!.getBoundingClientRect();
+      const control = row.querySelector('input, select')!.getBoundingClientRect();
+      return { labelRight: label.right, controlLeft: control.left, controlRight: control.right };
+    });
+    const rights = rows.map((row) => row.controlRight);
+    return {
+      overflow: document.documentElement.scrollWidth - innerWidth,
+      rightDrift: Math.max(...rights) - Math.min(...rights),
+      overlaps: rows.filter((row) => row.labelRight > row.controlLeft).length,
+    };
+  });
+  expect(layout.overflow).toBeLessThanOrEqual(0);
+  expect(layout.rightDrift).toBeLessThanOrEqual(1);
+  expect(layout.overlaps).toBe(0);
+  await page.screenshot({
+    path: `build/screenshots/settings-${testInfo.project.name}.png`,
+    fullPage: true,
+  });
 });
 
 test('large text, themes and degraded states remain readable', async ({ page }, testInfo) => {

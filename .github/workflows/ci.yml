@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }} ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            platform: windows
+            runtime: win32
+            arch: x64
+          - runner: ubuntu-22.04
+            platform: linux
+            runtime: linux
+            arch: x64
+          - runner: macos-15
+            platform: macos
+            runtime: darwin
+            arch: x64
+          - runner: macos-15-arm64
+            platform: macos
+            runtime: darwin
+            arch: arm64
+    uses: $/.github/workflows/build.yml
+    with:
+      runner: ${{ matrix.runner }}
+      platform: ${{ matrix.platform }}
+      runtime: ${{ matrix.runtime }}
+      arch: ${{ matrix.arch }}

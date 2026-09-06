@@ -25,4 +25,7 @@ jobs:
         with:
           version: 0.12.6
           enable-cache: false
-      - run: uvx --from zizmor==1.30.0 zizmor .github/workflows
+      - name: Audit workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: uvx --from zizmor==1.30.0 zizmor --strict-collection .github/workflows

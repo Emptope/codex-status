@@ -114,8 +114,19 @@ export function start(command, args, options = {}) {
   };
 }
 
+export function packageInvocation(
+  args,
+  {
+    entry = process.env.npm_execpath,
+    platform = process.platform,
+    executable = process.execPath,
+  } = {},
+) {
+  if (entry) return { command: executable, args: [entry, ...args] };
+  return { command: platform === 'win32' ? 'pnpm.cmd' : 'pnpm', args };
+}
+
 export function startPackage(args, options = {}) {
-  const entry = process.env.npm_execpath;
-  if (!entry) throw new Error('Package manager execution path is unavailable');
-  return start(process.execPath, [entry, ...args], options);
+  const invocation = packageInvocation(args);
+  return start(invocation.command, invocation.args, options);
 }

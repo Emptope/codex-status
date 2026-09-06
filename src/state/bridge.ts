@@ -36,9 +36,9 @@ export async function subscribe(
 export async function drag() {
   if (native) await getCurrentWindow().startDragging();
 }
-export async function resizeHeight() {
+export async function resizeHeight(height: number) {
   if (!native) return false;
-  await getCurrentWindow().startResizeDragging('South');
+  await command('resize', { width: innerWidth, height });
   return true;
 }
 export async function fit(width: number, height: number) {

@@ -1,12 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import brandIcon from '../../src-tauri/icons/icon.svg?url';
   import {
-    Activity,
     ChevronDown,
     ChevronUp,
-    CircleCheck,
-    CircleHelp,
-    Clock,
     Pin,
     PinOff,
     RefreshCw,
@@ -22,16 +19,20 @@
   import Details from './Details.svelte';
   import Preferences from './Settings.svelte';
   import { shouldDrag } from './drag';
+  import { draggedHeight, viewWidth, type View } from './layout';
 
   let snapshot = $state<Snapshot>(empty);
   let settings = $state<Settings>(defaults);
-  let view = $state<'summary' | 'details' | 'sessions' | 'settings'>('summary');
+  let view = $state<View>('summary');
   let selected = $state<string | null>(null);
   let now = $state(Date.now());
   let refreshing = $state(false);
   let error = $state('');
   let resized = $state(false);
   let fitting = 0;
+  let resizeFrame = 0;
+  let resizeValue = 0;
+  let resizing: { pointer: number; y: number; height: number } | null = null;
   let content: HTMLElement;
   const session = $derived(
     snapshot.sessions.find((s) => s.id === (settings.pinnedSession || selected)) ||
@@ -81,16 +82,33 @@
     if (shouldDrag(event)) void drag();
   }
   function resizeCard(event: PointerEvent) {
-    if (event.button !== 0 || !event.isPrimary) return;
+    if (!native || event.button !== 0 || !event.isPrimary) return;
+    const edge = event.currentTarget as HTMLElement;
+    event.preventDefault();
     event.stopPropagation();
+    edge.setPointerCapture(event.pointerId);
+    resizing = { pointer: event.pointerId, y: event.screenY, height: innerHeight };
     resized = true;
-    void resizeHeight()
-      .then((started) => {
-        if (!started) resized = false;
-      })
-      .catch(() => {
+  }
+  function resizeCardMove(event: PointerEvent) {
+    if (!resizing || event.pointerId !== resizing.pointer) return;
+    resizeValue = draggedHeight(resizing.height, resizing.y, event.screenY);
+    if (resizeFrame) return;
+    resizeFrame = requestAnimationFrame(() => {
+      resizeFrame = 0;
+      void resizeHeight(resizeValue).catch(() => {
         resized = false;
+        resizing = null;
       });
+    });
+  }
+  function resizeCardEnd(event: PointerEvent) {
+    if (!resizing || event.pointerId !== resizing.pointer) return;
+    const edge = event.currentTarget as HTMLElement;
+    if (edge.hasPointerCapture(event.pointerId)) {
+      edge.releasePointerCapture(event.pointerId);
+    }
+    resizing = null;
   }
   function showView(next: typeof view) {
     resized = false;
@@ -102,7 +120,7 @@
     if (!collapsed && resized) return;
     fitting += 1;
     void fit(
-      collapsed ? 240 : panel ? 360 : 300,
+      collapsed ? 240 : viewWidth(currentView),
       panel ? 480 : Math.max(40, Math.ceil(content.scrollHeight)),
     )
       .catch(() => {})
@@ -155,6 +173,7 @@
       observer.disconnect();
       window.removeEventListener('resize', followWindow);
       clearInterval(timer);
+      if (resizeFrame) cancelAnimationFrame(resizeFrame);
     };
   });
   $effect(() => {
@@ -175,7 +194,6 @@
 >
   {#if settings.collapsed}
     <div class="collapsed-row">
-      <span class="status-icon" data-status={status}><Activity size={16} /></span>
       <strong class="truncate" title={session?.path}>{session?.project || 'Codex Status'}</strong>
       <span class="numeric">{percent(bucket?.windows[0]?.remaining.value)}</span>
       <button
@@ -187,7 +205,7 @@
     </div>
   {:else}
     <header>
-      <strong class="brand">Codex Status</strong>
+      <strong class="brand"><img class="brand-icon" src={brandIcon} alt="" />Codex Status</strong>
       {#if settings.muted}<BellOff size={14} aria-label="Notifications muted" />{/if}
       <button
         class="icon"
@@ -224,15 +242,6 @@
         }}
         title={session?.path}
       >
-        <span class="status-icon" data-status={status}
-          >{#if status === 'completed'}<CircleCheck
-              size={18}
-            />{:else if status === 'running'}<Activity
-              size={18}
-            />{:else if status.startsWith('waiting')}<Clock size={18} />{:else}<CircleHelp
-              size={18}
-            />{/if}</span
-        >
         <strong class="truncate">{session?.project || 'No session'}</strong>
         <span class="status-word">{session ? activity[status] : ''}</span>
       </button>
@@ -301,6 +310,7 @@
                   showView('details');
                 }}
                 ><span class="session-name">{item.project || 'Unknown project'}</span><span
+                  class="session-status"
                   data-status={item.activity.value || 'unknown'}
                   >{activity[item.activity.value || 'unknown']}</span
                 ><span class="session-path">{item.path}</span></button
@@ -318,6 +328,10 @@
       aria-orientation="horizontal"
       data-no-drag
       onpointerdown={resizeCard}
+      onpointermove={resizeCardMove}
+      onpointerup={resizeCardEnd}
+      onpointercancel={resizeCardEnd}
+      onlostpointercapture={resizeCardEnd}
     ></div>
   {/if}
 </main>

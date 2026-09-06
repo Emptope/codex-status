@@ -5,6 +5,7 @@ import { cleanBuild, root } from './clean.mjs';
 import { acquireBuildLock } from './lock.mjs';
 import { start, startPackage } from './process.mjs';
 import { clearArtifact, stageExecutable } from './release.mjs';
+import { projectMetadata, verifyArtifact } from './validate.mjs';
 
 const task = process.argv[2];
 if (!['verify', 'build', 'dev', 'preview'].includes(task)) throw new Error('Unknown task');
@@ -12,6 +13,7 @@ const lockPath = join(root, '.build.lock');
 const releaseLock = await acquireBuildLock(lockPath);
 const jobs = new Set();
 const env = { ...process.env, CARGO_TARGET_DIR: cargoTarget(root) };
+delete env.NO_COLOR;
 let interrupted = false;
 let stopping;
 
@@ -78,8 +80,9 @@ process.once('SIGTERM', interrupt);
 let failure;
 try {
   await cleanBuild({ preserveArtifacts: true });
+  const metadata = await projectMetadata(root);
   if (task === 'verify') {
-    await run('uvx', ['--from', 'zizmor==1.30.0', 'zizmor', '.github/workflows']);
+    await runPackage(['run', 'lint:actions']);
     await runPackage([
       'exec',
       'prettier',
@@ -118,6 +121,7 @@ try {
       'scripts/build/lock.test.mjs',
       'scripts/build/process.test.mjs',
       'scripts/build/release.test.mjs',
+      'scripts/build/validate.test.mjs',
       'scripts/probe/records.test.mjs',
       'scripts/probe/rpc.test.mjs',
     ]);
@@ -128,6 +132,9 @@ try {
     await runPackage(['exec', 'vite', 'build']);
     await runPackageBuild(['exec', 'tauri', 'build', '--no-bundle', '--ci']);
     const artifact = await stageExecutable(root, env.CARGO_TARGET_DIR);
+    await verifyArtifact(root, metadata, process.platform, process.arch, {
+      requireExecutable: true,
+    });
     console.log(`Built executable at ${artifact.path} (${artifact.bytes} bytes)`);
     console.log(`Wrote checksum at ${artifact.checksumPath}`);
   } else if (task === 'dev') {

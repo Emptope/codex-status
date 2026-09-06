@@ -164,12 +164,22 @@ header {
 }
 
 .brand {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 1rem;
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.brand-icon {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  border-radius: 3px;
 }
 
 .icon {
@@ -215,12 +225,6 @@ header {
   white-space: nowrap;
   min-width: 0;
   flex: 1;
-}
-
-.status-icon {
-  display: flex;
-  flex-shrink: 0;
-  color: var(--muted);
 }
 
 [data-status='running'],
@@ -472,20 +476,29 @@ th:first-child {
 }
 
 .setting {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 152px;
   align-items: center;
-  justify-content: space-between;
   gap: 10px;
   min-height: 34px;
   margin: 3px 0;
 }
 
+.setting-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.setting > :last-child {
+  justify-self: end;
+}
+
 .setting input[type='number'] {
-  width: 64px;
+  width: 72px;
 }
 
 .setting select {
-  max-width: 150px;
+  width: 152px;
 }
 
 input,
@@ -502,6 +515,7 @@ textarea {
 input[type='checkbox'] {
   width: 16px;
   height: 16px;
+  margin: 0;
   accent-color: var(--green);
 }
 
@@ -544,7 +558,7 @@ textarea {
 .session-item {
   width: 100%;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) 104px;
   gap: 5px 10px;
   text-align: left;
   padding: 10px 5px;
@@ -557,7 +571,16 @@ textarea {
 }
 
 .session-name {
+  min-width: 0;
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-status {
+  overflow: hidden;
+  font-size: 12px;
+  text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -595,5 +618,20 @@ textarea {
 @media (prefers-reduced-motion: reduce) {
   .spinning svg {
     animation: none;
+  }
+}
+
+@media (max-width: 300px) {
+  .setting {
+    grid-template-columns: minmax(0, 1fr) minmax(72px, 42%);
+  }
+
+  .setting select {
+    width: 100%;
+  }
+
+  .session-item {
+    grid-template-columns: minmax(0, 1fr) 88px;
+    gap-column: 7px;
   }
 }
