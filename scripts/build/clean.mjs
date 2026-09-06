@@ -1,21 +1,26 @@
 import { lstat, mkdir, readdir, realpath, rm } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const root = fileURLToPath(new URL('../../', import.meta.url));
 
-async function removeDirectory(directory, message) {
+async function canonicalDirectory(directory, message) {
   const info = await lstat(directory).catch((error) => {
     if (error.code === 'ENOENT') return null;
     throw error;
   });
-  if (
-    info &&
-    (info.isSymbolicLink() || !info.isDirectory() || (await realpath(directory)) !== directory)
-  ) {
+  if (!info) return null;
+  if (info.isSymbolicLink() || !info.isDirectory()) {
     throw new Error(message);
   }
-  await rm(directory, { recursive: true, force: true });
+  const canonical = join(await realpath(dirname(directory)), basename(directory));
+  if ((await realpath(directory)) !== canonical) throw new Error(message);
+  return canonical;
+}
+
+async function removeDirectory(directory, message) {
+  const canonical = await canonicalDirectory(directory, message);
+  if (canonical) await rm(canonical, { recursive: true, force: true });
 }
 
 async function artifactFilesOnly(directory) {
@@ -31,17 +36,12 @@ async function artifactFilesOnly(directory) {
 }
 
 export async function cleanOutputs(directory, { preserveArtifacts = false } = {}) {
-  const info = await lstat(directory).catch((error) => {
-    if (error.code === 'ENOENT') return null;
-    throw error;
-  });
-  if (
-    info &&
-    (info.isSymbolicLink() || !info.isDirectory() || (await realpath(directory)) !== directory)
-  ) {
-    throw new Error('Unsafe build directory');
+  const requested = directory;
+  directory = await canonicalDirectory(directory, 'Unsafe build directory');
+  if (!directory) {
+    await mkdir(requested, { recursive: true });
+    directory = await canonicalDirectory(requested, 'Unsafe build directory');
   }
-  await mkdir(directory, { recursive: true });
   for (const name of ['web', 'release', 'screenshots', 'test-results']) {
     await removeDirectory(join(directory, name), 'Unsafe build output');
   }
@@ -59,7 +59,7 @@ export async function cleanOutputs(directory, { preserveArtifacts = false } = {}
       await removeDirectory(join(cargo, target.name, 'release', 'bundle'), 'Unsafe bundle output');
     }
   }
-  return directory;
+  return requested;
 }
 
 export async function cleanBuild(options) {
