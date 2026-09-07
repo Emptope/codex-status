@@ -75,7 +75,7 @@ pub fn quotas(value: &Value, at: i64) -> Vec<Quota> {
 
 impl Rpc {
     pub async fn start(executable: &str, root: Option<&str>) -> Result<Self, String> {
-        let mut command = executable::command(executable).await;
+        let mut command = executable::command(executable).await?;
         command
             .args(["app-server", "--listen", "stdio://"])
             .stdin(Stdio::piped())
@@ -96,11 +96,16 @@ impl Rpc {
             output,
             sequence: 0,
         };
-        rpc.call("initialize").await?;
-        rpc.input
-            .write_all(b"{\"method\":\"initialized\",\"params\":{}}\n")
-            .await
-            .map_err(|_| "source-write-failed")?;
+        if rpc.call("initialize").await.is_err()
+            || rpc
+                .input
+                .write_all(b"{\"method\":\"initialized\",\"params\":{}}\n")
+                .await
+                .is_err()
+        {
+            rpc.close().await;
+            return Err("source-start-failed".into());
+        }
         Ok(rpc)
     }
 

@@ -488,6 +488,18 @@ test('settings controls align without text overlap', async ({ page }, testInfo) 
   });
 });
 
+test('cli executable whitespace is removed before saving', async ({ page }) => {
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByLabel('CLI executable').fill('  tool  ');
+  const request = page.waitForRequest(
+    (request) => request.url().endsWith('/api/save_preferences') && request.method() === 'POST',
+  );
+
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+
+  expect((await request).postDataJSON().settings.executable).toBe('tool');
+});
+
 test('command approval sound can be previewed and disabled', async ({ page }) => {
   await mockSound(page);
   await page.reload({ waitUntil: 'networkidle' });

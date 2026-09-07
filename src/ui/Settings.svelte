@@ -32,6 +32,7 @@
     try {
       await apply({
         ...draft,
+        executable: draft.executable.trim(),
         roots: roots
           .split('\n')
           .map((v) => v.trim())

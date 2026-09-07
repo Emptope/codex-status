@@ -50,6 +50,10 @@ fn quota_refresh_throttle(wake: QueryWake, elapsed: Duration) -> Duration {
     }
 }
 
+fn retry_source(error: &str) -> bool {
+    error != "source-start-failed"
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct QuotaOwner {
     generation: u64,
@@ -342,6 +346,7 @@ impl Runtime {
     }
 
     pub fn update_settings(&self, settings: Settings) -> Result<(), String> {
+        let settings = settings.normalized();
         settings.save(&self.settings_path)?;
         let (source_changed, state) = {
             let mut preferences = self.settings.lock().unwrap();
@@ -592,6 +597,7 @@ impl Runtime {
         let mut configuration = None;
         let mut failures: u32 = 0;
         let mut auth_paused = false;
+        let mut start_paused = false;
         let mut last_query;
         loop {
             if self.stop.load(Ordering::Relaxed) {
@@ -610,12 +616,16 @@ impl Runtime {
                 configuration = Some(signature);
                 failures = 0;
                 auth_paused = false;
+                start_paused = false;
             }
-            if auth_paused {
+            if auth_paused || start_paused {
                 tokio::select! {
                     _ = self.shutdown.notified() => break,
-                    _ = self.refresh.notified() => auth_paused = false,
-                    _ = self.quota_refresh.notified() => auth_paused = false,
+                    _ = self.refresh.notified() => {
+                        auth_paused = false;
+                        start_paused = false;
+                    },
+                    _ = self.quota_refresh.notified(), if auth_paused => auth_paused = false,
                 }
                 continue;
             }
@@ -678,6 +688,7 @@ impl Runtime {
                 if error == "auth-required" {
                     auth_paused = true;
                 }
+                start_paused = !retry_source(&error);
                 self.publish_generation(generation, |state| {
                     let changed = state.connection != "offline"
                         || state.error.as_deref() != Some(error.as_str())
@@ -709,7 +720,7 @@ impl Runtime {
                 state.refreshing = false;
                 changed
             });
-            if auth_paused {
+            if auth_paused || start_paused {
                 continue;
             }
             let interval = if failures > 0 {
@@ -773,5 +784,12 @@ mod tests {
 
         let external = json!({"account": null, "requiresOpenaiAuth": false});
         assert_eq!(account_mode(&external), "externalProvider");
+    }
+
+    #[test]
+    fn invalid_source_start_waits_for_user_action() {
+        assert!(!retry_source("source-start-failed"));
+        assert!(retry_source("query-timeout"));
+        assert!(retry_source("source-read-failed"));
     }
 }

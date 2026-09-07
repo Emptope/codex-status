@@ -133,6 +133,11 @@ pub fn default_root() -> PathBuf {
 }
 
 impl Settings {
+    pub fn normalized(mut self) -> Self {
+        self.executable = self.executable.trim().to_owned();
+        self
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         if self.roots.len() > 8
             || self
@@ -143,6 +148,7 @@ impl Settings {
             return Err("invalid-data-roots".into());
         }
         if self.executable.is_empty()
+            || self.executable != self.executable.trim()
             || self.executable.len() > 4096
             || self.executable.contains('\0')
             || !(12..=18).contains(&self.font_size)
@@ -169,7 +175,7 @@ impl Settings {
                 if bytes.len() > 65536 {
                     continue;
                 }
-                if let Ok(settings) = serde_json::from_slice::<Self>(&bytes)
+                if let Ok(settings) = serde_json::from_slice::<Self>(&bytes).map(Self::normalized)
                     && settings.validate().is_ok()
                 {
                     return (
@@ -183,7 +189,8 @@ impl Settings {
     }
 
     pub fn save(&self, path: &Path) -> Result<(), String> {
-        self.validate()?;
+        let settings = self.clone().normalized();
+        settings.validate()?;
         let write = || -> std::io::Result<()> {
             let parent = path.parent().unwrap_or_else(|| Path::new("."));
             fs::create_dir_all(parent)?;
@@ -192,7 +199,7 @@ impl Settings {
             temporary
                 .as_file()
                 .set_permissions(std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
-            temporary.write_all(&serde_json::to_vec_pretty(self)?)?;
+            temporary.write_all(&serde_json::to_vec_pretty(&settings)?)?;
             temporary.as_file().sync_all()?;
             let previous_valid = fs::read(path)
                 .ok()
@@ -255,5 +262,27 @@ mod tests {
         value["completionSound"] = serde_json::json!(false);
         let disabled = serde_json::from_value::<Settings>(value).unwrap();
         assert_eq!(disabled.completion_sound, CompletionSound::Off);
+    }
+
+    #[test]
+    fn executable_whitespace_is_normalized_at_storage_boundaries() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let settings = Settings {
+            executable: "  tool  ".into(),
+            ..Settings::default()
+        };
+
+        settings.save(&path).unwrap();
+
+        let mut stored: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(stored["executable"], "tool");
+
+        stored["executable"] = serde_json::json!(" tool ");
+        fs::write(&path, serde_json::to_vec_pretty(&stored).unwrap()).unwrap();
+        let (loaded, warning) = Settings::load(&path);
+        assert_eq!(loaded.executable, "tool");
+        assert_eq!(warning, None);
     }
 }

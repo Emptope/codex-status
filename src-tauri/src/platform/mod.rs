@@ -97,6 +97,7 @@ fn save_preferences(
     state: tauri::State<AppState>,
     settings: Settings,
 ) -> Result<(), String> {
+    let settings = settings.normalized();
     settings.validate()?;
     if let Some(window) = app.get_webview_window("main") {
         window

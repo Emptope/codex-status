@@ -172,7 +172,14 @@ pub(super) fn resolve_in(
     None
 }
 
-pub async fn command(executable: &str) -> Command {
+fn same_file(left: &Path, right: &Path) -> bool {
+    left.canonicalize()
+        .ok()
+        .zip(right.canonicalize().ok())
+        .is_some_and(|(left, right)| left == right)
+}
+
+pub async fn command(executable: &str) -> Result<Command, String> {
     let inherited = inherited_paths();
     #[cfg(target_os = "macos")]
     let paths = combine_paths(
@@ -183,11 +190,14 @@ pub async fn command(executable: &str) -> Command {
     let paths = inherited;
     let program = resolve_in(OsStr::new(executable), &paths, &executable_extensions())
         .unwrap_or_else(|| PathBuf::from(executable));
+    if env::current_exe().is_ok_and(|current| same_file(&program, &current)) {
+        return Err("source-start-failed".into());
+    }
     let mut command = Command::new(program);
     if let Ok(path) = env::join_paths(paths) {
         command.env("PATH", path);
     }
-    command
+    Ok(command)
 }
 
 #[cfg(test)]
@@ -227,5 +237,12 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[tokio::test]
+    async fn current_process_cannot_be_launched_as_its_own_source() {
+        let current = env::current_exe().unwrap();
+        let error = command(current.to_str().unwrap()).await.unwrap_err();
+        assert_eq!(error, "source-start-failed");
     }
 }
