@@ -27,7 +27,7 @@ fn registered_paths() -> Vec<OsString> {
             .ok()?
             .get_value::<String, _>("Path")
             .ok()
-            .map(OsString::from)
+            .map(|value| expand_variables(&value, |variable| env::var_os(variable)))
     })
     .collect()
 }
@@ -35,6 +35,31 @@ fn registered_paths() -> Vec<OsString> {
 #[cfg(not(windows))]
 fn registered_paths() -> Vec<OsString> {
     Vec::new()
+}
+
+#[cfg(any(windows, test))]
+pub(super) fn expand_variables(value: &str, lookup: impl Fn(&str) -> Option<OsString>) -> OsString {
+    let mut expanded = OsString::new();
+    let mut remaining = value;
+    while let Some(start) = remaining.find('%') {
+        expanded.push(&remaining[..start]);
+        let tail = &remaining[start + 1..];
+        let Some(end) = tail.find('%') else {
+            expanded.push(&remaining[start..]);
+            return expanded;
+        };
+        let variable = &tail[..end];
+        if !variable.is_empty()
+            && let Some(value) = lookup(variable)
+        {
+            expanded.push(value);
+        } else {
+            expanded.push(&remaining[start..start + end + 2]);
+        }
+        remaining = &tail[end + 1..];
+    }
+    expanded.push(remaining);
+    expanded
 }
 
 pub(super) fn extend_paths(paths: &mut Vec<PathBuf>, value: &OsStr) {
@@ -51,6 +76,20 @@ fn inherited_paths() -> Vec<PathBuf> {
         extend_paths(&mut paths, &value);
     }
     paths
+}
+
+#[cfg(windows)]
+fn application_roots() -> Vec<PathBuf> {
+    env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .map(|path| path.join("Programs"))
+        .into_iter()
+        .collect()
+}
+
+#[cfg(not(windows))]
+fn application_roots() -> Vec<PathBuf> {
+    Vec::new()
 }
 
 #[cfg(any(target_os = "macos", test))]
@@ -172,6 +211,44 @@ pub(super) fn resolve_in(
     None
 }
 
+pub(super) fn resolve_below(
+    executable: &OsStr,
+    roots: &[PathBuf],
+    extensions: &[OsString],
+    max_depth: usize,
+) -> Option<PathBuf> {
+    if Path::new(executable).components().count() != 1 {
+        return None;
+    }
+    let mut level = roots.to_vec();
+    for depth in 0..=max_depth {
+        level.sort();
+        level.dedup();
+        let mut next = Vec::new();
+        for directory in level {
+            if let Some(program) =
+                resolve_in(executable, std::slice::from_ref(&directory), extensions)
+            {
+                return Some(program);
+            }
+            if depth == max_depth {
+                continue;
+            }
+            let Ok(entries) = std::fs::read_dir(directory) else {
+                continue;
+            };
+            next.extend(
+                entries
+                    .filter_map(Result::ok)
+                    .map(|entry| entry.path())
+                    .filter(|path| path.is_dir()),
+            );
+        }
+        level = next;
+    }
+    None
+}
+
 fn same_file(left: &Path, right: &Path) -> bool {
     left.canonicalize()
         .ok()
@@ -188,10 +265,18 @@ pub async fn command(executable: &str) -> Result<Command, String> {
     );
     #[cfg(not(target_os = "macos"))]
     let paths = inherited;
-    let program = resolve_in(OsStr::new(executable), &paths, &executable_extensions())
+    let extensions = executable_extensions();
+    let program = resolve_in(OsStr::new(executable), &paths, &extensions)
+        .or_else(|| resolve_below(OsStr::new(executable), &application_roots(), &extensions, 3))
         .unwrap_or_else(|| PathBuf::from(executable));
     if env::current_exe().is_ok_and(|current| same_file(&program, &current)) {
         return Err("source-start-failed".into());
+    }
+    let mut paths = paths;
+    if let Some(parent) = program.parent().filter(|_| program.is_absolute())
+        && !paths.iter().any(|path| path == parent)
+    {
+        paths.insert(0, parent.to_owned());
     }
     let mut command = Command::new(program);
     if let Ok(path) = env::join_paths(paths) {
@@ -237,6 +322,73 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn resolver_finds_executables_in_nested_application_directories() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("publisher").join("product").join("bin");
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("tool.exe"), b"tool").unwrap();
+        let extensions = vec![OsString::from(".exe")];
+
+        assert_eq!(
+            resolve_below(
+                OsStr::new("tool"),
+                &[root.path().to_owned()],
+                &extensions,
+                3
+            ),
+            Some(directory.join("tool.exe"))
+        );
+        assert_eq!(
+            resolve_below(
+                root.path().join("tool").as_os_str(),
+                &[root.path().to_owned()],
+                &extensions,
+                3
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn expandable_registry_paths_find_command_shims() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("npm");
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("tool.cmd"), b"tool").unwrap();
+        let stored = format!("%APPDATA%{}npm", std::path::MAIN_SEPARATOR);
+        let expanded = expand_variables(&stored, |variable| {
+            variable
+                .eq_ignore_ascii_case("APPDATA")
+                .then(|| root.path().as_os_str().to_owned())
+        });
+        let mut paths = Vec::new();
+        extend_paths(&mut paths, &expanded);
+
+        assert_eq!(
+            resolve_in(OsStr::new("tool"), &paths, &[OsString::from(".cmd")]),
+            Some(directory.join("tool.cmd"))
+        );
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn command_shims_can_be_started() {
+        let root = tempfile::tempdir().unwrap();
+        let shim = root.path().join("tool.cmd");
+        fs::write(&shim, b"@echo off\r\necho ready\r\n").unwrap();
+
+        let output = command(shim.to_str().unwrap())
+            .await
+            .unwrap()
+            .output()
+            .await
+            .unwrap();
+
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "ready");
     }
 
     #[tokio::test]
