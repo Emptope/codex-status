@@ -68,6 +68,7 @@ pub enum Event {
         at: i64,
         model: Option<String>,
         effort: Option<String>,
+        manual_approvals: Option<bool>,
     },
     Usage {
         at: i64,
@@ -120,6 +121,10 @@ pub struct Session {
     pub turn_id: Option<String>,
     #[serde(skip)]
     pub approval_requests: BTreeSet<String>,
+    #[serde(skip)]
+    pub manual_approvals: bool,
+    #[serde(skip)]
+    pub approval_context_at: Option<i64>,
 }
 
 impl Session {
@@ -134,12 +139,14 @@ impl Session {
             usage: Field::absent("local", Quality::Unavailable),
             last_usage: Field::absent("local", Quality::Unavailable),
             context_limit: Field::absent("local", Quality::Unavailable),
-            context_used: Field::absent("local", Quality::Unsupported),
+            context_used: Field::absent("local", Quality::Unavailable),
             latest_at: 0,
             turn_started_at: None,
             duration_ms: None,
             turn_id: None,
             approval_requests: BTreeSet::new(),
+            manual_approvals: true,
+            approval_context_at: None,
         }
     }
 
@@ -160,12 +167,29 @@ impl Session {
         };
         self.latest_at = self.latest_at.max(at);
         match event {
-            Event::Context { model, effort, .. } => {
+            Event::Context {
+                model,
+                effort,
+                manual_approvals,
+                ..
+            } => {
                 if let Some(model) = model {
                     self.model.set(model, at);
                 }
                 if let Some(effort) = effort {
                     self.effort.set(effort, at);
+                }
+                if let Some(manual) = manual_approvals
+                    && self.approval_context_at.is_none_or(|old| at >= old)
+                {
+                    self.manual_approvals = manual;
+                    self.approval_context_at = Some(at);
+                    if !manual {
+                        self.approval_requests.clear();
+                        if self.activity.value == Some(Activity::WaitingApproval) {
+                            self.activity.set(Activity::Running, at);
+                        }
+                    }
                 }
             }
             Event::Usage {
@@ -178,6 +202,9 @@ impl Session {
                     self.usage.set(value, at);
                 }
                 if let Some(value) = last {
+                    if let Some(used) = value.total {
+                        self.context_used.set(used, at);
+                    }
                     self.last_usage.set(value, at);
                 }
                 if let Some(limit) = context_limit.filter(|value| *value > 0) {
@@ -219,7 +246,8 @@ impl Session {
                 self.activity.set(activity, at);
             }
             Event::ApprovalRequested { request, .. } => {
-                if self.turn_id.is_none()
+                if !self.manual_approvals
+                    || self.turn_id.is_none()
                     || self.activity.observed_at.is_some_and(|old| at < old)
                     || matches!(
                         self.activity.value,
@@ -371,7 +399,40 @@ mod tests {
         state.apply(event.clone());
         state.apply(event);
         assert_eq!(state.usage.value.unwrap().total, Some(120));
-        assert_eq!(state.context_used.quality, Quality::Unsupported);
+        assert_eq!(state.context_used.value, None);
+        assert_eq!(state.context_used.quality, Quality::Unavailable);
+    }
+
+    #[test]
+    fn latest_usage_tracks_current_context_and_can_drop_after_compaction() {
+        let mut state = session("/root");
+        let usage = |at, cumulative, current| Event::Usage {
+            at,
+            total: Some(Usage {
+                input: None,
+                cached_input: None,
+                output: None,
+                total: Some(cumulative),
+            }),
+            last: Some(Usage {
+                input: None,
+                cached_input: None,
+                output: None,
+                total: Some(current),
+            }),
+            context_limit: Some(1000),
+        };
+
+        state.apply(usage(1, 500, 400));
+        assert_eq!(state.context_used.value, Some(400));
+        assert_eq!(state.context_used.quality, Quality::Fresh);
+
+        state.apply(usage(2, 700, 120));
+        assert_eq!(state.usage.value.as_ref().unwrap().total, Some(700));
+        assert_eq!(state.context_used.value, Some(120));
+
+        state.apply(usage(1, 600, 450));
+        assert_eq!(state.context_used.value, Some(120));
     }
     #[test]
     fn waiting_requires_a_current_turn_and_terminal_events_are_explicit() {
@@ -427,6 +488,55 @@ mod tests {
             at: 5,
             request: "second".into(),
         });
+        assert_eq!(state.activity.value, Some(Activity::Running));
+        assert!(state.approval_requests.is_empty());
+    }
+
+    #[test]
+    fn automatic_review_context_suppresses_approval_waiting() {
+        let mut state = session("/root");
+        state.apply(start(1, "current"));
+        state.apply(Event::Context {
+            at: 2,
+            model: None,
+            effort: None,
+            manual_approvals: Some(false),
+        });
+        state.apply(Event::ApprovalRequested {
+            at: 3,
+            request: "automatic".into(),
+        });
+        assert_eq!(state.activity.value, Some(Activity::Running));
+        assert!(state.approval_requests.is_empty());
+
+        state.apply(Event::Context {
+            at: 4,
+            model: None,
+            effort: None,
+            manual_approvals: Some(true),
+        });
+        state.apply(Event::ApprovalRequested {
+            at: 5,
+            request: "human".into(),
+        });
+        assert_eq!(state.activity.value, Some(Activity::WaitingApproval));
+    }
+
+    #[test]
+    fn changing_to_automatic_review_resolves_existing_waiting_state() {
+        let mut state = session("/root");
+        state.apply(start(1, "current"));
+        state.apply(Event::ApprovalRequested {
+            at: 2,
+            request: "human".into(),
+        });
+        state.apply(Event::Context {
+            at: 3,
+            model: None,
+            effort: None,
+            manual_approvals: Some(false),
+        });
+
         assert_eq!(state.activity.value, Some(Activity::Running));
         assert!(state.approval_requests.is_empty());
     }

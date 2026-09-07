@@ -1,13 +1,29 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 import test from 'node:test';
 import { cargoTarget, runWithNormalizedTimes, stabilizeFingerprintTimes } from './cargo.mjs';
+import { buildLayout } from './layout.mjs';
+
+test('all generated files share one categorized build root', () => {
+  for (const path of Object.values(buildLayout)) {
+    assert.ok(path === 'build' || path.startsWith(`build${sep}`));
+  }
+  assert.equal(buildLayout.artifacts, join('build', 'artifacts'));
+  assert.equal(buildLayout.webStaging, join('build', 'staging', 'web'));
+  assert.equal(buildLayout.testResults, join('build', 'test', 'results'));
+});
 
 test('isolates Cargo targets by host platform and architecture', () => {
-  assert.equal(cargoTarget('/repo', 'linux', 'x64'), join('/repo', 'build', 'cargo', 'linux-x64'));
-  assert.equal(cargoTarget('/repo', 'win32', 'x64'), join('/repo', 'build', 'cargo', 'win32-x64'));
+  assert.equal(
+    cargoTarget('/repo', 'linux', 'x64'),
+    join('/repo', 'build', 'cache', 'cargo', 'linux-x64'),
+  );
+  assert.equal(
+    cargoTarget('/repo', 'win32', 'x64'),
+    join('/repo', 'build', 'cache', 'cargo', 'win32-x64'),
+  );
 });
 
 test('stabilizes only fingerprints updated by the current Cargo task', async () => {

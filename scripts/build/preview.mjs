@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { cargoTarget } from './cargo.mjs';
 import { root } from './clean.mjs';
+import { buildLayout, inBuild } from './layout.mjs';
 
 export function preview() {
   return {
@@ -21,7 +22,7 @@ export function preview() {
         localError: null,
         refreshing: false,
       };
-      const settingsPath = join(root, 'build', 'preview-settings.json');
+      const settingsPath = inBuild(root, buildLayout.previewSettings);
       const defaults = {
         roots: [],
         executable: 'codex',

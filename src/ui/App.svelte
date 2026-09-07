@@ -4,8 +4,6 @@
   import {
     ChevronDown,
     ChevronUp,
-    Pin,
-    PinOff,
     RefreshCw,
     Settings as SettingsIcon,
     X,
@@ -13,7 +11,7 @@
     BellOff,
   } from '@lucide/svelte';
   import { empty, defaults, type Snapshot, type Settings } from '../types/status';
-  import { activity, connectionLabel, percent, unit } from '../state/format';
+  import { activity, connectionLabel, error as errorLabel, percent, unit } from '../state/format';
   import { command, drag, fit, native, resizeHeight, save, subscribe } from '../state/bridge';
   import { playSound } from '../state/sound';
   import Quota from './Quota.svelte';
@@ -36,8 +34,7 @@
   let resizing: { pointer: number; y: number; height: number } | null = null;
   let content: HTMLElement;
   const session = $derived(
-    snapshot.sessions.find((s) => s.id === (settings.pinnedSession || selected)) ||
-      snapshot.sessions[0],
+    snapshot.sessions.find((s) => s.id === selected) || snapshot.sessions[0],
   );
   const bucket = $derived(
     snapshot.quotas.find((b) => b.id === settings.selectedBucket) ||
@@ -52,8 +49,7 @@
       const current = await command<Snapshot>('snapshot');
       if (current.revision > snapshot.revision) snapshot = current;
     } else snapshot = next;
-    if (settings.autoFollow && !settings.pinnedSession && view === 'summary')
-      selected = snapshot.sessions[0]?.id || null;
+    if (settings.autoFollow && view === 'summary') selected = snapshot.sessions[0]?.id || null;
   }
   async function apply(next: Settings) {
     await save(next);
@@ -68,7 +64,7 @@
     }
   }
   async function refresh() {
-    if (refreshing || snapshot.refreshing) return;
+    if (refreshing) return;
     refreshing = true;
     error = '';
     try {
@@ -217,7 +213,7 @@
       <button
         class="icon"
         class:spinning={refreshing || snapshot.refreshing}
-        disabled={refreshing || snapshot.refreshing}
+        disabled={refreshing}
         aria-label="Refresh"
         title="Refresh"
         onclick={refresh}><RefreshCw size={15} /></button
@@ -252,14 +248,6 @@
         <strong class="truncate">{session?.project || 'No session'}</strong>
         <span class="status-word">{session ? activity[status] : ''}</span>
       </button>
-      <button
-        class="icon"
-        disabled={!session}
-        aria-label={settings.pinnedSession ? 'Unpin session' : 'Pin session'}
-        title={settings.pinnedSession ? 'Unpin session' : 'Pin session'}
-        onclick={() => update({ pinnedSession: settings.pinnedSession ? null : session?.id })}
-        >{#if settings.pinnedSession}<PinOff size={15} />{:else}<Pin size={15} />{/if}</button
-      >
     </div>
     {#if bucket}
       <div class="quota-summary">
@@ -291,9 +279,13 @@
       >
     </footer>
     {#if error}<p class="error" role="alert">{error}</p>{/if}
+    {#if snapshot.error || snapshot.localError}<p class="error source-error" role="status">
+        {errorLabel[snapshot.error || snapshot.localError || ''] || 'Source unavailable'}
+      </p>{/if}
     {#if view !== 'summary'}
       <div class="view-title">
-        <span>{{ details: 'Details', sessions: 'Sessions', settings: 'Settings' }[view]}</span
+        <span
+          >{{ details: 'Session details', sessions: 'Sessions', settings: 'Settings' }[view]}</span
         ><button
           class="icon"
           aria-label="Close panel"
@@ -304,7 +296,7 @@
         >
       </div>
       <div class="scroll-view" data-no-drag>
-        {#if view === 'details'}<Details {session} {snapshot} {now} />
+        {#if view === 'details'}<Details {session} />
         {:else if view === 'settings'}<Preferences {settings} {apply} />
         {:else}
           <div class="sessions">
@@ -313,7 +305,6 @@
                 class:active={session?.id === item.id}
                 onclick={() => {
                   selected = item.id;
-                  if (settings.pinnedSession) void update({ pinnedSession: item.id });
                   showView('details');
                 }}
                 ><span class="session-name">{item.project || 'Unknown project'}</span><span

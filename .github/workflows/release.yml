@@ -84,4 +84,4 @@ jobs:
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" build/artifacts/* LICENSE --verify-tag --generate-notes --title "codex-status $GITHUB_REF_NAME"
+        run: gh release create "$GITHUB_REF_NAME" build/artifacts/* --verify-tag --generate-notes --title "codex-status $GITHUB_REF_NAME"

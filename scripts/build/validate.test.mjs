@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -63,12 +63,31 @@ test('project versions and package names must agree', () => {
 
 test('desktop windows stay out of the taskbar', () => {
   assert.doesNotThrow(() =>
-    validatePresence({ app: { windows: [{ skipTaskbar: true }, { skipTaskbar: true }] } }),
+    validatePresence({
+      app: {
+        macOSPrivateApi: true,
+        windows: [
+          { skipTaskbar: true, transparent: true },
+          { skipTaskbar: true, transparent: true },
+        ],
+      },
+    }),
   );
   assert.throws(() => validatePresence({ app: { windows: [] } }), /desktop window/);
   assert.throws(
-    () => validatePresence({ app: { windows: [{ skipTaskbar: true }, {}] } }),
+    () =>
+      validatePresence({
+        app: { macOSPrivateApi: true, windows: [{ skipTaskbar: true, transparent: true }, {}] },
+      }),
     /skipTaskbar/,
+  );
+  assert.throws(
+    () => validatePresence({ app: { macOSPrivateApi: true, windows: [{ skipTaskbar: true }] } }),
+    /transparency/,
+  );
+  assert.throws(
+    () => validatePresence({ app: { windows: [{ skipTaskbar: true, transparent: true }] } }),
+    /macOS private API/,
   );
 });
 
@@ -87,4 +106,14 @@ test('artifact validation checks names, hashes, and the complete release set', a
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test('GitHub releases publish only validated artifacts and checksums', async () => {
+  const workflow = await readFile(
+    new URL('../../.github/workflows/release.yml', import.meta.url),
+    'utf8',
+  );
+  const command = workflow.split('\n').find((line) => line.includes('gh release create'));
+  assert.match(command, /build\/artifacts\/\*/);
+  assert.doesNotMatch(command, /\bLICENSE\b/);
 });

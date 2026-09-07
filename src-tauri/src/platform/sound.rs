@@ -6,7 +6,7 @@ use objc2_app_kit::NSSound;
 #[cfg(target_os = "macos")]
 use objc2_foundation::NSString;
 #[cfg(target_os = "macos")]
-use std::{cell::RefCell, path::Path};
+use std::{cell::RefCell, path::Path, thread, time::Duration};
 #[cfg(target_os = "macos")]
 use tauri::Manager;
 use tauri::{AppHandle, Emitter};
@@ -42,17 +42,48 @@ impl Players {
         }
     }
 
-    fn play(&self, sound: Sound) -> bool {
-        let player = match sound {
+    fn player(&self, sound: Sound) -> Option<&NSSound> {
+        match sound {
             Sound::ApprovalBell => &self.approval_bell,
             Sound::CompletionBell => &self.completion_bell,
             Sound::CompletionDing => &self.completion_ding,
             Sound::QuotaAlert => &self.quota_alert,
             Sound::QuotaBattery => &self.quota_battery,
-        };
-        player.as_ref().is_some_and(|player| {
+        }
+        .as_deref()
+    }
+
+    fn warm(&self) {
+        for sound in [
+            Sound::ApprovalBell,
+            Sound::CompletionBell,
+            Sound::CompletionDing,
+            Sound::QuotaAlert,
+            Sound::QuotaBattery,
+        ] {
+            if let Some(player) = self.player(sound) {
+                let volume = player.volume();
+                player.setVolume(0.0);
+                player.setCurrentTime(0.0);
+                if player.play() {
+                    // NSSound decodes compressed data and starts CoreAudio lazily. Give the
+                    // silent warm-up enough time to move that work out of the first alert.
+                    thread::sleep(Duration::from_millis(20));
+                    player.stop();
+                }
+                player.setCurrentTime(0.0);
+                player.setVolume(volume);
+            }
+        }
+    }
+
+    fn play(&self, sound: Sound) -> bool {
+        self.player(sound).is_some_and(|player| {
+            if player.isPlaying() {
+                player.stop();
+            }
             player.setCurrentTime(0.0);
-            player.isPlaying() || player.play()
+            player.play()
         })
     }
 }
@@ -65,7 +96,11 @@ thread_local! {
 #[cfg(target_os = "macos")]
 pub fn prepare(app: &AppHandle) {
     if let Ok(root) = app.path().resource_dir() {
-        PLAYERS.with(|players| *players.borrow_mut() = Some(Players::load(&root)));
+        PLAYERS.with(|players| {
+            let loaded = Players::load(&root);
+            loaded.warm();
+            *players.borrow_mut() = Some(loaded);
+        });
     }
 }
 

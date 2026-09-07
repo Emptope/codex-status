@@ -19,7 +19,7 @@
 
 Codex Status 显示本地会话、上下文用量、账户额度和状态通知。应用只读监听会话数据，并通过配置的 `codex app-server` 进程查询实时账户数据。
 
-命令需要审批时默认播放内置铃声，新完成的任务默认播放内置“叮”提示音；完成提示和低额度告警均有备选音效。每类提示音都可在设置的“Notifications”中选择、试听或关闭。
+命令需要审批和任务完成时默认播放各自的内置铃声，低额度告警默认播放内置电量不足提示音；完成提示和低额度告警均有备选音效。每类提示音都可在设置的“Notifications”中选择、试听或关闭。
 
 应用在 Windows 和 Linux 中仅保留系统托盘图标，在 macOS 中仅保留菜单栏图标，不会额外出现任务栏或 Dock 入口。取消勾选托盘中的 **Show / Hide** 可隐藏悬浮窗，且不会停止后台监听或提示音。关闭 Status notifications 并为 Task completion sound 保留一种音效，即可只保留声音提示。
 
@@ -52,7 +52,7 @@ pnpm dev
 pnpm build
 ```
 
-`pnpm verify` 执行格式、类型、Lint、单元、集成和浏览器检查。`pnpm build` 在 `build/artifacts` 中生成当前平台的发布产物和 SHA-256。
+`pnpm verify` 执行格式、类型、Lint、单元、集成和浏览器检查。所有生成文件统一放在 `build` 下：发布包及校验和位于 `build/artifacts`，可复用的 Cargo 与 Vite 数据位于 `build/cache`，前端装配文件位于 `build/staging`，测试输出位于 `build/test`。每次 `pnpm build` 都会替换之前的发布产物；`pnpm clean` 会保留可复用缓存并清理输出，`pnpm clean:cache` 则清理缓存。
 
 Windows 使用 `./scripts/build/windows.ps1 verify|build|dev` 初始化 MSVC 环境并执行对应任务。
 

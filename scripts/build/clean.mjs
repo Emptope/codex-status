@@ -1,6 +1,7 @@
 import { lstat, mkdir, readdir, realpath, rm } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { buildLayout, inBuild } from './layout.mjs';
 
 export const root = fileURLToPath(new URL('../../', import.meta.url));
 
@@ -42,13 +43,24 @@ export async function cleanOutputs(directory, { preserveArtifacts = false } = {}
     await mkdir(requested, { recursive: true });
     directory = await canonicalDirectory(requested, 'Unsafe build directory');
   }
-  for (const name of ['web', 'release', 'screenshots', 'test-results']) {
+  for (const name of [
+    'staging',
+    'test',
+    'preview',
+    'web',
+    'release',
+    'screenshots',
+    'test-results',
+  ]) {
     await removeDirectory(join(directory, name), 'Unsafe build output');
   }
   const artifacts = join(directory, 'artifacts');
   if (preserveArtifacts) await artifactFilesOnly(artifacts);
   else await removeDirectory(artifacts, 'Unsafe build output');
-  const cargo = join(directory, 'cargo');
+  for (const name of ['cargo', 'vite-cache']) {
+    await removeDirectory(join(directory, name), 'Unsafe legacy build output');
+  }
+  const cargo = join(directory, 'cache', 'cargo');
   const targets = await readdir(cargo, { withFileTypes: true }).catch((error) => {
     if (error.code === 'ENOENT') return [];
     throw error;
@@ -62,12 +74,35 @@ export async function cleanOutputs(directory, { preserveArtifacts = false } = {}
   return requested;
 }
 
+export async function cleanCaches(directory) {
+  const requested = directory;
+  directory = await canonicalDirectory(directory, 'Unsafe build directory');
+  if (!directory) {
+    await mkdir(requested, { recursive: true });
+    directory = await canonicalDirectory(requested, 'Unsafe build directory');
+  }
+  await removeDirectory(join(directory, 'cache'), 'Unsafe build cache');
+  for (const name of ['cargo', 'vite-cache']) {
+    await removeDirectory(join(directory, name), 'Unsafe legacy build cache');
+  }
+  return requested;
+}
+
 export async function cleanBuild(options) {
   const repository = await realpath(root);
-  return cleanOutputs(join(repository, 'build'), options);
+  return cleanOutputs(inBuild(repository, buildLayout.root), options);
+}
+
+export async function cleanBuildCaches() {
+  const repository = await realpath(root);
+  return cleanCaches(inBuild(repository, buildLayout.root));
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  if (process.argv.length !== 2) throw new Error('Build path overrides are forbidden');
-  await cleanBuild();
+  const mode = process.argv[2] || 'outputs';
+  if (process.argv.length > 3 || !['outputs', 'cache'].includes(mode)) {
+    throw new Error('Expected outputs or cache; build path overrides are forbidden');
+  }
+  if (mode === 'cache') await cleanBuildCaches();
+  else await cleanBuild();
 }

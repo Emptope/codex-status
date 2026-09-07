@@ -4,6 +4,7 @@ import { appendFile, lstat, readFile, readdir } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { buildLayout, inBuild } from './layout.mjs';
 import { releaseName } from './release.mjs';
 
 const execute = promisify(execFile);
@@ -61,6 +62,12 @@ export function validatePresence(tauriConfig) {
   if (windows.some((window) => window?.skipTaskbar !== true)) {
     throw new Error('Every desktop window must enable skipTaskbar');
   }
+  if (windows.some((window) => window?.transparent !== true)) {
+    throw new Error('Every desktop window must enable transparency for rounded cards');
+  }
+  if (tauriConfig.app?.macOSPrivateApi !== true) {
+    throw new Error('macOS private API must be enabled for transparent rounded cards');
+  }
 }
 
 export async function projectMetadata(directory = root) {
@@ -101,7 +108,7 @@ function artifactNames(metadata) {
 export async function verifyArtifact(directory, metadata, platform, arch) {
   target(platform, arch);
   const name = releaseName(metadata.name, metadata.version, platform, arch);
-  const path = join(directory, 'build', 'artifacts', name);
+  const path = join(inBuild(directory, buildLayout.artifacts), name);
   const checksumPath = `${path}.sha256`;
   const [info, content, checksum] = await Promise.all([
     lstat(path),
@@ -118,7 +125,7 @@ export async function verifyArtifact(directory, metadata, platform, arch) {
 }
 
 export async function verifyArtifacts(directory, metadata) {
-  const artifactDirectory = join(directory, 'build', 'artifacts');
+  const artifactDirectory = inBuild(directory, buildLayout.artifacts);
   const expected = artifactNames(metadata).sort();
   const actual = (await readdir(artifactDirectory)).sort();
   if (actual.length !== expected.length || actual.some((name, index) => name !== expected[index])) {

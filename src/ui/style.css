@@ -7,8 +7,9 @@
   font-size: 13px;
   letter-spacing: 0;
   color: #23272b;
-  background: #f5f6f7;
+  background: transparent;
   font-synthesis: none;
+  --card-radius: 10px;
   --surface: #f5f6f7;
   --text: #23272b;
   --muted: #58616a;
@@ -33,7 +34,7 @@
   --track: #414b45;
   color-scheme: dark;
   color: var(--text);
-  background: var(--surface);
+  background: transparent;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -49,7 +50,7 @@
     --track: #414b45;
     color-scheme: dark;
     color: var(--text);
-    background: var(--surface);
+    background: transparent;
   }
 }
 
@@ -60,6 +61,7 @@
 body {
   margin: 0;
   min-width: 240px;
+  background: transparent;
 }
 
 button,
@@ -100,6 +102,8 @@ main {
   margin: 0 auto;
   padding: 6px 10px 4px;
   background: var(--surface);
+  border-radius: var(--card-radius);
+  overflow: hidden;
 }
 
 main.panel {

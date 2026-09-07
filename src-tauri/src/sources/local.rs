@@ -4,7 +4,7 @@ use chrono::DateTime;
 use serde::Deserialize;
 use serde_json::Value;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs::{self, File},
     io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
@@ -99,6 +99,12 @@ fn session(root: &str, row: &Value) -> Option<Session> {
     ))
 }
 
+fn guardian_review(row: &Value) -> bool {
+    row["type"] == "session_meta"
+        && (row["payload"]["thread_source"] == "guardian_review"
+            || row["payload"]["source"]["subagent"]["other"] == "guardian")
+}
+
 fn approval_argument(value: &Value) -> bool {
     if value["sandbox_permissions"] == "require_escalated" {
         return true;
@@ -142,6 +148,19 @@ fn approval_response(payload: &Value) -> Option<String> {
     .flatten()
 }
 
+fn manual_approvals(payload: &Value) -> Option<bool> {
+    let policy = payload["approval_policy"]
+        .as_str()
+        .or_else(|| payload["approvalPolicy"].as_str());
+    let reviewer = payload["approvals_reviewer"]
+        .as_str()
+        .or_else(|| payload["approvalsReviewer"].as_str());
+    if policy.is_none() && reviewer.is_none() {
+        return None;
+    }
+    Some(policy != Some("never") && reviewer != Some("auto_review"))
+}
+
 fn event(row: &Value) -> Option<Event> {
     let at = at(row)?;
     let payload = &row["payload"];
@@ -150,6 +169,7 @@ fn event(row: &Value) -> Option<Event> {
             at,
             model: text(&payload["model"], 128),
             effort: text(&payload["effort"], 32),
+            manual_approvals: manual_approvals(payload),
         }),
         "event_msg" => match payload["type"].as_str()? {
             "token_count" => Some(Event::Usage {
@@ -265,6 +285,7 @@ impl Cursor {
 pub struct Local {
     cursors: BTreeMap<PathBuf, Cursor>,
     sessions: BTreeMap<PathBuf, Session>,
+    ignored: BTreeSet<PathBuf>,
     quotas: BTreeMap<(PathBuf, String), Limit>,
     modified: BTreeMap<PathBuf, (u64, Option<SystemTime>)>,
     pub error: Option<String>,
@@ -324,9 +345,15 @@ impl Local {
                     .any(|root| path.starts_with(Path::new(root).join("sessions")))
         });
         self.cursors
-            .retain(|path, _| self.sessions.contains_key(path));
+            .retain(|path, _| self.sessions.contains_key(path) || self.ignored.contains(path));
+        self.ignored.retain(|path| {
+            path.exists()
+                && roots
+                    .iter()
+                    .any(|root| path.starts_with(Path::new(root).join("sessions")))
+        });
         self.modified
-            .retain(|path, _| self.sessions.contains_key(path));
+            .retain(|path, _| self.sessions.contains_key(path) || self.ignored.contains(path));
         self.quotas.retain(|(path, _), _| {
             path.exists()
                 && roots
@@ -347,6 +374,7 @@ impl Local {
         let Ok(meta) = fs::symlink_metadata(path) else {
             self.sessions.remove(path);
             self.cursors.remove(path);
+            self.ignored.remove(path);
             self.quotas.retain(|(source, _), _| source != path);
             self.modified.remove(path);
             return;
@@ -371,9 +399,16 @@ impl Local {
                 Ok((rows, reset, more)) => {
                     if reset {
                         self.sessions.remove(path);
+                        self.ignored.remove(path);
                         self.quotas.retain(|(source, _), _| source != path);
                     }
                     for row in rows {
+                        if !self.sessions.contains_key(path) && guardian_review(&row) {
+                            self.ignored.insert(path.to_owned());
+                        }
+                        if self.ignored.contains(path) {
+                            continue;
+                        }
                         if !self.sessions.contains_key(path)
                             && let Some(session) = session(root, &row)
                         {
@@ -414,6 +449,34 @@ impl Local {
             }
         }
         self.error = Some("record-limit".into());
+    }
+
+    pub fn refresh_tracked(&mut self, roots: &[String], cancelled: &impl Fn() -> bool) -> bool {
+        let paths: Vec<PathBuf> = self.cursors.keys().cloned().collect();
+        let mut changed = false;
+        for path in paths {
+            if cancelled() {
+                break;
+            }
+            let signature = fs::symlink_metadata(&path)
+                .ok()
+                .map(|meta| (meta.len(), meta.modified().ok()));
+            if signature
+                .as_ref()
+                .is_some_and(|signature| self.modified.get(&path) == Some(signature))
+            {
+                continue;
+            }
+            let Some(root) = roots
+                .iter()
+                .find(|root| path.starts_with(Path::new(root).join("sessions")))
+            else {
+                continue;
+            };
+            self.update_until(&path, root, cancelled);
+            changed = true;
+        }
+        changed
     }
 
     pub fn snapshot(&self) -> Vec<Session> {
@@ -504,6 +567,65 @@ mod tests {
     }
 
     #[test]
+    fn latest_token_total_becomes_current_context_usage() {
+        let row = json!({
+            "timestamp":"2026-09-05T00:00:01Z",
+            "type":"event_msg",
+            "payload":{
+                "type":"token_count",
+                "info":{
+                    "total_token_usage":{"total_tokens":5000},
+                    "last_token_usage":{"total_tokens":900},
+                    "model_context_window":1000
+                }
+            }
+        });
+        let mut parsed = Session::new("id".into(), "/work".into(), "work".into());
+        parsed.apply(event(&row).expect("token count should become a usage event"));
+
+        assert_eq!(parsed.usage.value.unwrap().total, Some(5000));
+        assert_eq!(parsed.context_used.value, Some(900));
+        assert_eq!(parsed.context_limit.value, Some(1000));
+    }
+
+    #[test]
+    fn guardian_reviews_do_not_become_sessions_or_quota_sources() {
+        let directory = tempfile::tempdir().unwrap();
+        let work = directory.path().join("work");
+        fs::create_dir(&work).unwrap();
+        let record = directory.path().join("guardian.jsonl");
+        let meta = json!({
+            "type":"session_meta",
+            "payload":{
+                "id":"guardian",
+                "parent_thread_id":"main",
+                "cwd":work,
+                "source":{"subagent":{"other":"guardian"}},
+                "thread_source":"guardian_review"
+            }
+        });
+        let started = json!({"timestamp":"2026-09-05T00:00:01Z","type":"event_msg","payload":{"type":"task_started","turn_id":"review"}});
+        let completed = json!({"timestamp":"2026-09-05T00:00:02Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"review"}});
+        let quota = json!({"timestamp":"2026-09-05T00:00:03Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":50}}}});
+        fs::write(
+            &record,
+            format!("{meta}\n{started}\n{completed}\n{quota}\n"),
+        )
+        .unwrap();
+
+        let mut local = Local::default();
+        local.update(&record, &directory.path().to_string_lossy());
+
+        assert!(local.snapshot().is_empty());
+        assert!(
+            local
+                .quotas(Some(&directory.path().to_string_lossy()))
+                .0
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn command_approval_calls_and_outputs_become_session_events() {
         let approval = json!({
             "timestamp":"2026-09-05T00:00:02Z",
@@ -546,6 +668,41 @@ mod tests {
         assert!(matches!(
             event(&resolved),
             Some(Event::ApprovalResolved { request, .. }) if request == "approval"
+        ));
+    }
+
+    #[test]
+    fn turn_context_distinguishes_human_and_automatic_approval_review() {
+        let context = |approval_policy: &str, approvals_reviewer: &str| {
+            json!({
+                "timestamp":"2026-09-05T00:00:01Z",
+                "type":"turn_context",
+                "payload":{
+                    "approval_policy":approval_policy,
+                    "approvals_reviewer":approvals_reviewer
+                }
+            })
+        };
+        assert!(matches!(
+            event(&context("on-request", "user")),
+            Some(Event::Context {
+                manual_approvals: Some(true),
+                ..
+            })
+        ));
+        assert!(matches!(
+            event(&context("on-request", "auto_review")),
+            Some(Event::Context {
+                manual_approvals: Some(false),
+                ..
+            })
+        ));
+        assert!(matches!(
+            event(&context("never", "user")),
+            Some(Event::Context {
+                manual_approvals: Some(false),
+                ..
+            })
         ));
     }
 

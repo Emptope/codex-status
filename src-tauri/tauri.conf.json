@@ -3,10 +3,11 @@
   "productName": "Codex Status",
   "identifier": "io.codexstatus.desktop",
   "build": {
-    "frontendDist": "../build/web",
+    "frontendDist": "../build/staging/web",
     "devUrl": "http://127.0.0.1:1420"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "label": "main",
@@ -15,6 +16,7 @@
         "height": 160,
         "minWidth": 240,
         "minHeight": 40,
+        "transparent": true,
         "decorations": false,
         "alwaysOnTop": true,
         "resizable": false,

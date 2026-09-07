@@ -6,11 +6,12 @@ node_modules/
 
 # Build output
 /build/
+!/scripts/build/
+!/scripts/build/**
 /dist/
 /target/
 /src-tauri/target/
 /src-tauri/gen/schemas/
-.build.lock
 *.tsbuildinfo
 
 # Test output

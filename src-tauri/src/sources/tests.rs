@@ -1,11 +1,11 @@
 use super::executable::marked_path;
 use super::{
-    QuotaSource, drain,
+    QueryWake, RuntimeState, drain,
     executable::{application_dirs_in, combine_paths, extend_paths, resolve_in},
     local::Local,
-    prefer_local_quotas,
+    local_quota_advanced, quota_refresh_throttle,
 };
-use crate::status::Activity;
+use crate::status::{Activity, Field, Quality, Quota, QuotaWindow, Session, Snapshot};
 use notify::{Event, EventKind, event::Flag};
 use serde_json::json;
 use std::{
@@ -17,6 +17,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         mpsc,
     },
+    time::Duration,
 };
 
 #[test]
@@ -99,7 +100,61 @@ fn dropped_and_imprecise_events_request_immediate_reconciliation() {
 }
 
 #[test]
-fn reconciliation_advances_a_record_after_an_imprecise_change() {
+fn newer_local_quota_events_wake_the_authoritative_rpc_source_once() {
+    let mut observed_at = None;
+
+    assert!(!local_quota_advanced(
+        super::QuotaSource::Rpc,
+        None,
+        &mut observed_at
+    ));
+    assert!(local_quota_advanced(
+        super::QuotaSource::Rpc,
+        Some(100),
+        &mut observed_at
+    ));
+    assert!(!local_quota_advanced(
+        super::QuotaSource::Rpc,
+        Some(100),
+        &mut observed_at
+    ));
+    assert!(!local_quota_advanced(
+        super::QuotaSource::Local,
+        Some(200),
+        &mut observed_at
+    ));
+    assert!(!local_quota_advanced(
+        super::QuotaSource::Rpc,
+        Some(200),
+        &mut observed_at
+    ));
+    assert!(local_quota_advanced(
+        super::QuotaSource::Rpc,
+        Some(300),
+        &mut observed_at
+    ));
+}
+
+#[test]
+fn manual_refresh_bypasses_the_automatic_quota_throttle() {
+    let recent = Duration::from_millis(100);
+
+    assert_eq!(
+        quota_refresh_throttle(QueryWake::Manual, recent),
+        Duration::ZERO
+    );
+    assert_eq!(
+        quota_refresh_throttle(QueryWake::Scheduled, recent),
+        Duration::ZERO
+    );
+    assert_eq!(
+        quota_refresh_throttle(QueryWake::Automatic, recent),
+        Duration::from_millis(2900)
+    );
+}
+
+#[test]
+fn tracked_refresh_advances_a_record_after_a_missed_change_event() {
     let directory = tempfile::tempdir().unwrap();
     let sessions = directory.path().join("sessions");
     let work = directory.path().join("work");
@@ -113,14 +168,18 @@ fn reconciliation_advances_a_record_after_an_imprecise_change() {
     let mut local = Local::default();
     let root = directory.path().to_string_lossy();
     local.update(&record, &root);
-    OpenOptions::new()
-        .append(true)
-        .open(&record)
-        .unwrap()
-        .write_all(format!("{completed}\n").as_bytes())
-        .unwrap();
+    let encoded = completed.to_string();
+    let encoded = encoded.as_bytes();
+    let split = encoded.len() / 2;
+    let mut file = OpenOptions::new().append(true).open(&record).unwrap();
+    file.write_all(&encoded[..split]).unwrap();
+    local.update(&record, &root);
+    assert_eq!(local.snapshot()[0].activity.value, Some(Activity::Running));
+    file.write_all(&encoded[split..]).unwrap();
+    file.write_all(b"\n").unwrap();
 
-    local.reconcile(&[root.into_owned()], || false);
+    let roots = [root.into_owned()];
+    assert!(local.refresh_tracked(&roots, &|| false));
 
     assert_eq!(
         local.snapshot()[0].activity.value,
@@ -128,18 +187,112 @@ fn reconciliation_advances_a_record_after_an_imprecise_change() {
     );
 }
 
+fn quota(source: &str, observed_at: i64, remaining: f64) -> Quota {
+    let mut field = Field::absent(source, Quality::Unavailable);
+    field.set(remaining, observed_at);
+    Quota {
+        id: "codex".into(),
+        name: "Codex".into(),
+        windows: vec![QuotaWindow {
+            remaining: field,
+            minutes: Some(300),
+            resets_at: None,
+        }],
+        credit_balance: None,
+        unlimited_credits: None,
+    }
+}
+
 #[test]
-fn fresh_local_quota_updates_chatgpt_without_replacing_newer_rpc_data() {
-    assert!(prefer_local_quotas(QuotaSource::Rpc, Some(200), Some(100)));
-    assert!(!prefer_local_quotas(QuotaSource::Rpc, Some(100), Some(200)));
-    assert!(prefer_local_quotas(
-        QuotaSource::Local,
-        Some(100),
-        Some(200)
-    ));
-    assert!(!prefer_local_quotas(
-        QuotaSource::None,
+fn each_account_mode_has_one_authoritative_quota_owner() {
+    let mut state = RuntimeState::new(Snapshot::default());
+    let rpc_owner = state
+        .observe_account(0, "chatgpt", "account-a".into(), None, 1)
+        .unwrap();
+    assert!(state.observe_rpc(&rpc_owner, vec![quota("appServer", 100, 80.0)], 100));
+
+    assert!(state.observe_local(
+        0,
+        Vec::new(),
+        None,
+        vec![quota("local", 200, 10.0)],
         Some(200),
-        Some(100)
     ));
+    assert_eq!(
+        state.snapshot.quotas[0].windows[0].remaining.source,
+        "appServer"
+    );
+    assert_eq!(
+        state.snapshot.quotas[0].windows[0].remaining.value,
+        Some(80.0)
+    );
+
+    state
+        .observe_account(0, "apiKey", "account-b".into(), None, 201)
+        .unwrap();
+    assert!(state.snapshot.quotas.is_empty());
+    assert!(!state.observe_rpc(&rpc_owner, vec![quota("appServer", 202, 70.0)], 202));
+    assert!(state.observe_local(
+        0,
+        Vec::new(),
+        None,
+        vec![quota("local", 50, 25.0)],
+        Some(50),
+    ));
+    assert_eq!(
+        state.snapshot.quotas[0].windows[0].remaining.source,
+        "local"
+    );
+
+    state
+        .observe_account(0, "signedOut", "signed-out".into(), None, 203)
+        .unwrap();
+    assert!(state.snapshot.quotas.is_empty());
+}
+
+#[test]
+fn account_and_configuration_changes_reject_stale_quota_results() {
+    let mut state = RuntimeState::new(Snapshot::default());
+    let old_owner = state
+        .observe_account(0, "chatgpt", "account-a".into(), None, 1)
+        .unwrap();
+    assert!(state.observe_rpc(&old_owner, vec![quota("appServer", 2, 90.0)], 2));
+
+    let new_owner = state
+        .observe_account(0, "chatgpt", "account-b".into(), None, 3)
+        .unwrap();
+    assert!(state.snapshot.quotas.is_empty());
+    assert!(!state.observe_rpc(&old_owner, vec![quota("appServer", 4, 80.0)], 4));
+    assert!(state.observe_rpc(&new_owner, vec![quota("appServer", 5, 70.0)], 5));
+
+    state.reset_sources(false);
+    assert_eq!(state.snapshot.account, "unknown");
+    assert_eq!(state.snapshot.connection, "connecting");
+    assert!(state.snapshot.quotas.is_empty());
+    assert!(!state.observe_rpc(&new_owner, vec![quota("appServer", 6, 60.0)], 6));
+    assert!(!state.observe_local(0, Vec::new(), None, vec![quota("local", 7, 50.0)], Some(7),));
+}
+
+#[test]
+fn root_generation_change_clears_sessions_and_rejects_old_scan() {
+    let mut state = RuntimeState::new(Snapshot::default());
+    state
+        .snapshot
+        .sessions
+        .push(Session::new("old".into(), "/old".into(), "old".into()));
+    state.reset_sources(true);
+    assert!(state.snapshot.sessions.is_empty());
+
+    assert!(!state.observe_local(
+        0,
+        vec![Session::new(
+            "stale".into(),
+            "/stale".into(),
+            "stale".into(),
+        )],
+        None,
+        Vec::new(),
+        None,
+    ));
+    assert!(state.snapshot.sessions.is_empty());
 }

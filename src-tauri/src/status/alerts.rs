@@ -81,6 +81,9 @@ impl Alerts {
             }
         }
         self.quotas.retain(|id, _| quota_keys.contains(id));
+        if alerts.iter().any(|alert| alert.kind == AlertKind::Quota) {
+            alerts.retain(|alert| alert.kind != AlertKind::Completion);
+        }
         self.initialized = true;
         alerts
     }
@@ -218,5 +221,45 @@ mod tests {
         let alerts = tracker.observe(&snapshot, 10);
         assert_eq!(alerts.len(), 1);
         assert_eq!(alerts[0].kind, AlertKind::Completion);
+    }
+
+    #[test]
+    fn new_low_quota_alert_takes_priority_over_simultaneous_task_completion() {
+        let mut session = session();
+        session.apply(Event::TurnStarted {
+            at: 1,
+            turn: "turn".into(),
+        });
+        let mut remaining = Field::absent("local", Quality::Unavailable);
+        remaining.set(20.0, 1);
+        let mut snapshot = Snapshot {
+            sessions: vec![session],
+            quotas: vec![Quota {
+                id: "quota".into(),
+                name: "Account".into(),
+                windows: vec![QuotaWindow {
+                    remaining,
+                    minutes: Some(300),
+                    resets_at: Some(100),
+                }],
+                credit_balance: None,
+                unlimited_credits: None,
+            }],
+            ..Snapshot::default()
+        };
+        let mut tracker = Alerts::default();
+        assert!(tracker.observe(&snapshot, 10).is_empty());
+
+        snapshot.sessions[0].apply(Event::TurnEnded {
+            at: 2,
+            turn: "turn".into(),
+            activity: Activity::Completed,
+            duration_ms: None,
+        });
+        snapshot.quotas[0].windows[0].remaining.set(9.0, 2);
+
+        let alerts = tracker.observe(&snapshot, 10);
+        assert_eq!(alerts.len(), 1);
+        assert_eq!(alerts[0].kind, AlertKind::Quota);
     }
 }

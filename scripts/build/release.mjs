@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
-import { chmod, copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
+import { buildLayout, inBuild } from './layout.mjs';
 
 export function executableName(name, platform = process.platform) {
   return `${name}${platform === 'win32' ? '.exe' : ''}`;
@@ -41,7 +42,7 @@ export function artifactPath(
   platform = process.platform,
   arch = process.arch,
 ) {
-  return join(root, 'build', 'artifacts', releaseName(name, version, platform, arch));
+  return join(inBuild(root, buildLayout.artifacts), releaseName(name, version, platform, arch));
 }
 
 async function releaseSource(target, name, platform) {
@@ -80,22 +81,4 @@ export async function stageArtifact(
     name: basename(destination),
     bytes: outputInfo.size,
   };
-}
-
-export async function clearArtifact(
-  root,
-  metadata,
-  platform = process.platform,
-  arch = process.arch,
-) {
-  const directory = join(root, 'build', 'artifacts');
-  const stem = releaseStem(metadata.name, metadata.version, platform, arch);
-  const entries = await readdir(directory).catch((error) => {
-    if (error.code === 'ENOENT') return [];
-    throw error;
-  });
-  const paths = entries
-    .filter((name) => name === stem || name.startsWith(`${stem}.`))
-    .map((name) => join(directory, name));
-  await Promise.all(paths.map((path) => rm(path, { force: true })));
 }

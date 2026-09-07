@@ -1,6 +1,6 @@
 [package]
 name = "codex-status"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2024"
 rust-version = "1.98"
 description = "Read-only local session status window"
@@ -27,7 +27,7 @@ notify = "8"
 walkdir = "2"
 tempfile = "3"
 toml = "0.9"
-tauri = { version = "2", optional = true, features = ["tray-icon"] }
+tauri = { version = "2", optional = true, features = ["macos-private-api", "tray-icon"] }
 tauri-plugin-notification = { version = "2", optional = true }
 
 [target.'cfg(windows)'.dependencies]

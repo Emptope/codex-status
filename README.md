@@ -19,7 +19,7 @@
 
 Codex Status displays local sessions, context usage, account quotas, and status notifications. It watches session data without modifying it and queries the configured `codex app-server` process for live account data.
 
-Command approval requests play the bundled bell, and newly completed tasks play the bundled ding by default. Completion and low-quota alerts offer alternate sounds. Every sound can be selected, previewed, or disabled under Notifications in Settings.
+Command approval requests and newly completed tasks play their bundled bell sounds by default, while low-quota warnings use the bundled battery sound. Completion and low-quota alerts offer alternate sounds. Every sound can be selected, previewed, or disabled under Notifications in Settings.
 
 The app stays in the system tray on Windows and Linux and in the menu bar on macOS, without adding a taskbar or Dock entry. The tray's **Show / Hide** option can hide the card without stopping background monitoring or sounds. Turn off Status notifications while leaving Task completion sound set to a tone for sound-only alerts.
 
@@ -52,7 +52,7 @@ pnpm dev
 pnpm build
 ```
 
-`pnpm verify` runs formatting, type, lint, unit, integration, and browser checks. `pnpm build` writes the host release artifact and SHA-256 file to `build/artifacts`.
+`pnpm verify` runs formatting, type, lint, unit, integration, and browser checks. All generated files stay under `build`: release packages and checksums go to `build/artifacts`, reusable Cargo and Vite data to `build/cache`, frontend assembly files to `build/staging`, and test output to `build/test`. Each `pnpm build` replaces previous release output. Use `pnpm clean` to remove outputs while keeping reusable caches, or `pnpm clean:cache` to remove the caches.
 
 On Windows, use `./scripts/build/windows.ps1 verify|build|dev` to initialize the MSVC environment and run the selected task.
 

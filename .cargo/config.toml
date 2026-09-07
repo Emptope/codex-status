@@ -1,2 +1,2 @@
 [build]
-target-dir = "build/cargo"
+target-dir = "build/cache/cargo/local"

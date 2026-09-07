@@ -1,9 +1,10 @@
 import { readdir, stat, utimes } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { buildLayout, inBuild } from './layout.mjs';
 
 export function cargoTarget(root, platform = process.platform, arch = process.arch) {
-  return join(root, 'build', 'cargo', `${platform}-${arch}`);
+  return join(inBuild(root, buildLayout.cargoCache), `${platform}-${arch}`);
 }
 
 async function directories(path) {

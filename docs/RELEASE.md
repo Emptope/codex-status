@@ -13,7 +13,7 @@
 
 Every push to `main` and pull request runs all four targets through the reusable `Build target` workflow. Each job validates the runner, project versions, checks, build output, artifact format, name, and checksum.
 
-A matching `vX.Y.Z` tag rebuilds the matrix and publishes a GitHub Release containing one Windows executable, one Linux package, two macOS disk images, four `.sha256` files, and `LICENSE`.
+A matching `vX.Y.Z` tag rebuilds the matrix and publishes a GitHub Release containing one Windows executable, one Linux package, two macOS disk images, and four `.sha256` files.
 
 ## Release Gates
 
@@ -71,6 +71,6 @@ On both Windows 11 x64 and Ubuntu 22.04 x64, run one hour in the foreground and 
 
    Pushing the tag starts automatic publication. Do not move or overwrite an existing release tag; increment the project version and create a new tag instead. Tag signing remains optional.
 
-5. Wait for the public Release, then confirm the four release artifacts, four checksums, and `LICENSE`. Recheck checksums, installation, and startup on every target, plus Windows and macOS signatures when CI signing is enabled.
+5. Wait for the public Release, then confirm the four release artifacts and four checksums. Recheck checksums, installation, and startup on every target, plus Windows and macOS signatures when CI signing is enabled.
 
 The Linux `.deb` targets Ubuntu 22.04 and declares its WebKitGTK 4.1 and AppIndicator runtime dependencies. Under Wayland, always-on-top, global positioning, and tray behavior depend on the compositor and must be tested with the supported fallback behavior.

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { buildLayout } from '../../scripts/build/layout.mjs';
 
 const now = Date.UTC(2026, 8, 5, 3, 0, 0);
 const field = <T>(value: T) => ({
@@ -20,7 +21,7 @@ const snapshot = {
       usage: field({ input: 1200, cachedInput: 800, output: 300, total: 1500 }),
       lastUsage: field({ input: 200, cachedInput: 100, output: 40, total: 240 }),
       contextLimit: field(200000),
-      contextUsed: { value: null, source: 'local', observedAt: null, quality: 'unsupported' },
+      contextUsed: field(92_992),
       latestAt: now,
       turnStartedAt: now - 60_000,
       durationMs: null,
@@ -58,18 +59,18 @@ const settings = {
   selectedBucket: null,
   notifications: true,
   approvalSound: 'bell',
-  completionSound: 'ding',
-  quotaSound: 'alert',
+  completionSound: 'bell',
+  quotaSound: 'battery',
   muted: false,
   lowQuota: 10,
   position: null,
 };
 
-async function mock(page: Page) {
+async function mock(page: Page, initialSnapshot = snapshot) {
   await page.route('**/api/**', async (route) => {
     const name = new URL(route.request().url()).pathname.slice(5);
     if (route.request().method() === 'GET') {
-      await route.fulfill({ json: name === 'snapshot' ? snapshot : settings });
+      await route.fulfill({ json: name === 'snapshot' ? initialSnapshot : settings });
       return;
     }
     await route.fulfill({ status: 204, body: '' });
@@ -157,11 +158,76 @@ test('summary, details, sessions and settings remain operable', async ({ page })
   await expect(page.locator('meter').nth(1)).toHaveAttribute('data-level', 'medium');
   await expect(page.locator('.text-tool span')).toHaveText('1 session');
   await page.getByRole('button', { name: /a-project-with/ }).click();
+  await expect(page.locator('.view-title')).toContainText('Session details');
   await expect(page.getByText('Token usage')).toBeVisible();
+  const details = page.getByRole('region', { name: 'Session details' });
+  await expect(details.getByText('92,992')).toBeVisible();
+  await expect(details.getByRole('heading', { name: 'Account quota' })).toHaveCount(0);
+  await expect(details.getByRole('heading', { name: 'Connection' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Session list' }).click();
   await expect(page.getByText('/workspace/a-project-with-a-long-but-readable-name')).toBeVisible();
   await page.getByRole('button', { name: 'Settings' }).click();
   await expect(page.getByLabel('Theme')).toBeVisible();
+});
+
+test('expanded, collapsed, dark and narrow cards keep rounded transparent corners', async ({
+  page,
+}, testInfo) => {
+  const card = page.locator('main');
+  const corners = async () =>
+    page.evaluate(() => ({
+      root: getComputedStyle(document.documentElement).backgroundColor,
+      body: getComputedStyle(document.body).backgroundColor,
+      surface: getComputedStyle(document.querySelector('main')!).backgroundColor,
+      radius: getComputedStyle(document.querySelector('main')!).borderTopLeftRadius,
+      overflow: getComputedStyle(document.querySelector('main')!).overflow,
+      width: document.querySelector('main')!.getBoundingClientRect().width,
+    }));
+
+  await expect(card).toHaveCSS('border-top-left-radius', '10px');
+  expect(await corners()).toMatchObject({
+    root: 'rgba(0, 0, 0, 0)',
+    body: 'rgba(0, 0, 0, 0)',
+    radius: '10px',
+    overflow: 'hidden',
+  });
+  if (testInfo.project.name === 'narrow') expect((await corners()).width).toBe(240);
+
+  await page.getByRole('button', { name: 'Collapse' }).click();
+  await expect(card).toHaveClass(/collapsed/);
+  await expect(card).toHaveCSS('border-top-left-radius', '10px');
+
+  await page.getByRole('button', { name: 'Expand' }).click();
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByLabel('Theme').selectOption('dark');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  const dark = await corners();
+  expect(dark.surface).not.toBe('rgba(0, 0, 0, 0)');
+  expect(dark).toMatchObject({
+    root: 'rgba(0, 0, 0, 0)',
+    body: 'rgba(0, 0, 0, 0)',
+    radius: '10px',
+    overflow: 'hidden',
+  });
+});
+
+test('the session heading has no pin control', async ({ page }) => {
+  await expect(page.getByRole('button', { name: /^(Unpin|Pin) session$/ })).toHaveCount(0);
+  await expect(page.locator('.session-heading svg')).toHaveCount(0);
+});
+
+test('refresh remains usable while an account query is already running', async ({ page }) => {
+  await page.unroute('**/api/**');
+  await mock(page, { ...snapshot, revision: snapshot.revision + 1, refreshing: true });
+  await page.reload({ waitUntil: 'networkidle' });
+
+  const refresh = page.getByRole('button', { name: 'Refresh' });
+  await expect(refresh).toBeEnabled();
+  const request = page.waitForRequest(
+    (request) => request.url().endsWith('/api/refresh') && request.method() === 'POST',
+  );
+  await refresh.click();
+  await request;
 });
 
 test('the card surface is draggable without a dedicated control or cursor override', async ({
@@ -301,7 +367,7 @@ test('an expanded panel fills a window resized from its native edge', async ({
   expect(layout.cardHeight).toBe(layout.viewportHeight);
   expect(layout.bottomGap).toBeLessThanOrEqual(8);
   await page.screenshot({
-    path: `build/screenshots/resized-${testInfo.project.name}.png`,
+    path: `${buildLayout.testScreenshots}/resized-${testInfo.project.name}.png`,
     fullPage: true,
   });
 });
@@ -326,7 +392,9 @@ test('collapsed mode has stable controls and no horizontal overflow', async ({
   expect(order).toBe(true);
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
   expect(overflow).toBeLessThanOrEqual(0);
-  await page.screenshot({ path: `build/screenshots/collapsed-${testInfo.project.name}.png` });
+  await page.screenshot({
+    path: `${buildLayout.testScreenshots}/collapsed-${testInfo.project.name}.png`,
+  });
 });
 
 test('session history stays compact and scrolls inside the card', async ({ page }, testInfo) => {
@@ -376,7 +444,7 @@ test('session history stays compact and scrolls inside the card', async ({ page 
   );
   await expect(page.locator('.session-item svg')).toHaveCount(0);
   await page.screenshot({
-    path: `build/screenshots/sessions-${testInfo.project.name}.png`,
+    path: `${buildLayout.testScreenshots}/sessions-${testInfo.project.name}.png`,
     fullPage: true,
   });
 
@@ -415,7 +483,7 @@ test('settings controls align without text overlap', async ({ page }, testInfo) 
   expect(layout.rightDrift).toBeLessThanOrEqual(1);
   expect(layout.overlaps).toBe(0);
   await page.screenshot({
-    path: `build/screenshots/settings-${testInfo.project.name}.png`,
+    path: `${buildLayout.testScreenshots}/settings-${testInfo.project.name}.png`,
     fullPage: true,
   });
 });
@@ -444,8 +512,8 @@ test('command approval sound can be previewed and disabled', async ({ page }) =>
 test('task completion sound is selectable and can be disabled', async ({ page }) => {
   await page.getByRole('button', { name: 'Settings' }).click();
   const sound = page.getByRole('combobox', { name: 'Task completion sound' });
-  await expect(sound).toHaveValue('ding');
-  await sound.selectOption('bell');
+  await expect(sound).toHaveValue('bell');
+  await sound.selectOption('ding');
   await sound.selectOption('off');
   await expect(page.getByRole('button', { name: 'Preview task completion sound' })).toBeDisabled();
   const request = page.waitForRequest(
@@ -472,8 +540,8 @@ test('quota warning sound can be selected and previewed', async ({ page }) => {
   await page.reload({ waitUntil: 'networkidle' });
   await page.getByRole('button', { name: 'Settings' }).click();
   const sound = page.getByRole('combobox', { name: 'Quota warning sound' });
-  await expect(sound).toHaveValue('alert');
-  await sound.selectOption('battery');
+  await expect(sound).toHaveValue('battery');
+  await sound.selectOption('alert');
   await page.getByRole('button', { name: 'Preview quota warning sound' }).click();
   await expect
     .poll(() =>
@@ -484,7 +552,7 @@ test('quota warning sound can be selected and previewed', async ({ page }) => {
     (request) => request.url().endsWith('/api/save_preferences') && request.method() === 'POST',
   );
   await page.getByRole('button', { name: 'Save', exact: true }).click();
-  expect((await request).postDataJSON().settings.quotaSound).toBe('battery');
+  expect((await request).postDataJSON().settings.quotaSound).toBe('alert');
 });
 
 test('desktop approval and completion events play their configured sounds', async ({ page }) => {
@@ -538,7 +606,7 @@ test('large text, themes and degraded states remain readable', async ({ page }, 
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   await page.getByRole('button', { name: 'Close panel' }).click();
   await page.screenshot({
-    path: `build/screenshots/dark-${testInfo.project.name}.png`,
+    path: `${buildLayout.testScreenshots}/dark-${testInfo.project.name}.png`,
     fullPage: true,
   });
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
@@ -559,8 +627,11 @@ test('large text, themes and degraded states remain readable', async ({ page }, 
   );
   await page.reload({ waitUntil: 'networkidle' });
   await expect(page.locator('footer').getByText('Offline')).toBeVisible();
+  await expect(page.locator('main > .source-error')).toHaveText('Refresh timed out');
   await page.getByRole('button', { name: /a-project-with/ }).click();
-  await expect(page.getByText('Refresh timed out')).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Session details' }).locator('.error')).toHaveCount(
+    0,
+  );
 });
 
 test('external provider uses its configured name', async ({ page }) => {

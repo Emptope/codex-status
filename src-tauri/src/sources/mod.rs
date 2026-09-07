@@ -25,11 +25,146 @@ use std::{
 };
 use tokio::{sync::Notify, task::JoinHandle};
 
+const WATCH_WAIT: Duration = Duration::from_millis(250);
+const TRACKED_REFRESH: Duration = Duration::from_millis(500);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum QuotaSource {
     Rpc,
     Local,
     None,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QueryWake {
+    Manual,
+    Automatic,
+    Scheduled,
+}
+
+fn quota_refresh_throttle(wake: QueryWake, elapsed: Duration) -> Duration {
+    if wake == QueryWake::Automatic {
+        Duration::from_secs(3).saturating_sub(elapsed)
+    } else {
+        Duration::ZERO
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct QuotaOwner {
+    generation: u64,
+    source: QuotaSource,
+    account: String,
+}
+
+struct RuntimeState {
+    snapshot: Snapshot,
+    generation: u64,
+    quota_owner: Option<QuotaOwner>,
+}
+
+impl RuntimeState {
+    fn new(snapshot: Snapshot) -> Self {
+        Self {
+            snapshot,
+            generation: 0,
+            quota_owner: None,
+        }
+    }
+
+    fn reset_sources(&mut self, roots_changed: bool) {
+        self.generation = self.generation.wrapping_add(1);
+        self.quota_owner = None;
+        self.snapshot.quotas.clear();
+        self.snapshot.account = "unknown".into();
+        self.snapshot.provider = None;
+        self.snapshot.updated_at = None;
+        self.snapshot.error = None;
+        self.snapshot.connection = "connecting".into();
+        self.snapshot.refreshing = false;
+        if roots_changed {
+            self.snapshot.sessions.clear();
+            self.snapshot.local_error = None;
+        }
+    }
+
+    fn observe_account(
+        &mut self,
+        generation: u64,
+        mode: &str,
+        account: String,
+        provider: Option<String>,
+        at: i64,
+    ) -> Option<QuotaOwner> {
+        if generation != self.generation {
+            return None;
+        }
+        let owner = QuotaOwner {
+            generation,
+            source: quota_source(mode),
+            account,
+        };
+        if self.quota_owner.as_ref() != Some(&owner) {
+            self.snapshot.quotas.clear();
+            self.snapshot.updated_at = None;
+        }
+        self.quota_owner = Some(owner.clone());
+        self.snapshot.account = mode.into();
+        self.snapshot.provider = provider;
+        self.snapshot.error = None;
+        match owner.source {
+            QuotaSource::Rpc => self.snapshot.connection = "connecting".into(),
+            QuotaSource::Local => self.snapshot.connection = mode.into(),
+            QuotaSource::None => {
+                self.snapshot.connection = mode.into();
+                self.snapshot.updated_at = Some(at);
+            }
+        }
+        Some(owner)
+    }
+
+    fn observe_local(
+        &mut self,
+        generation: u64,
+        sessions: Vec<crate::status::Session>,
+        local_error: Option<String>,
+        quotas: Vec<crate::status::Quota>,
+        observed_at: Option<i64>,
+    ) -> bool {
+        if generation != self.generation {
+            return false;
+        }
+        self.snapshot.sessions = sessions;
+        self.snapshot.local_error = local_error;
+        if self.quota_owner.as_ref().is_some_and(|owner| {
+            owner.generation == generation && owner.source == QuotaSource::Local
+        }) {
+            self.snapshot.quotas = quotas;
+            if observed_at.is_some() {
+                self.snapshot.updated_at = observed_at;
+            }
+        }
+        true
+    }
+
+    fn observe_rpc(
+        &mut self,
+        owner: &QuotaOwner,
+        quotas: Vec<crate::status::Quota>,
+        at: i64,
+    ) -> bool {
+        if owner.source != QuotaSource::Rpc
+            || owner.generation != self.generation
+            || self.quota_owner.as_ref() != Some(owner)
+        {
+            return false;
+        }
+        self.snapshot.quotas = quotas;
+        self.snapshot.connection = "connected".into();
+        self.snapshot.error = None;
+        self.snapshot.updated_at = Some(at);
+        true
+    }
 }
 
 #[derive(Default)]
@@ -61,20 +196,6 @@ fn drain(receive: &mpsc::Receiver<notify::Result<notify::Event>>, lost: &AtomicB
     changes
 }
 
-fn quotas_observed_at(quotas: &[crate::status::Quota]) -> Option<i64> {
-    quotas
-        .iter()
-        .flat_map(|quota| &quota.windows)
-        .filter_map(|window| window.remaining.observed_at)
-        .max()
-}
-
-fn prefer_local_quotas(source: QuotaSource, local: Option<i64>, current: Option<i64>) -> bool {
-    source == QuotaSource::Local
-        || source == QuotaSource::Rpc
-            && local.is_some_and(|local| current.is_none_or(|current| local > current))
-}
-
 fn account_mode(value: &Value) -> &'static str {
     match value["account"]["type"].as_str() {
         Some("chatgpt") => "chatgpt",
@@ -93,8 +214,24 @@ fn quota_source(mode: &str) -> QuotaSource {
     }
 }
 
+fn local_quota_advanced(
+    source: QuotaSource,
+    observed_at: Option<i64>,
+    previous: &mut Option<i64>,
+) -> bool {
+    let advanced = observed_at.is_some_and(|at| previous.is_none_or(|old| at > old));
+    if advanced {
+        *previous = observed_at;
+    }
+    advanced && source == QuotaSource::Rpc
+}
+
 fn identity(value: &str) -> String {
     format!("{:x}", Sha256::digest(value.as_bytes()))[..24].to_owned()
+}
+
+fn account_identity(value: &Value) -> String {
+    identity(&serde_json::to_string(value).unwrap_or_default())
 }
 
 fn text(value: &Value, max: usize) -> Option<String> {
@@ -106,12 +243,14 @@ fn text(value: &Value, max: usize) -> Option<String> {
 
 pub struct Runtime {
     pub settings: Mutex<Settings>,
-    pub state: Mutex<Snapshot>,
+    state: Mutex<RuntimeState>,
     pub settings_path: PathBuf,
     pub hidden: AtomicBool,
     started: AtomicBool,
     stop: AtomicBool,
+    local_refresh: AtomicBool,
     refresh: Notify,
+    quota_refresh: Notify,
     shutdown: Notify,
     jobs: Mutex<Vec<JoinHandle<()>>>,
     changed: Box<dyn Fn(Snapshot) + Send + Sync>,
@@ -126,12 +265,14 @@ impl Runtime {
         };
         Arc::new(Self {
             settings: Mutex::new(settings),
-            state: Mutex::new(state),
+            state: Mutex::new(RuntimeState::new(state)),
             settings_path: path,
             hidden: AtomicBool::new(false),
             started: AtomicBool::new(false),
             stop: AtomicBool::new(false),
+            local_refresh: AtomicBool::new(false),
             refresh: Notify::new(),
+            quota_refresh: Notify::new(),
             shutdown: Notify::new(),
             jobs: Mutex::new(Vec::new()),
             changed: Box::new(changed),
@@ -139,7 +280,7 @@ impl Runtime {
     }
 
     pub fn snapshot(&self) -> Snapshot {
-        self.state.lock().unwrap().clone()
+        self.state.lock().unwrap().snapshot.clone()
     }
     pub fn preferences(&self) -> Settings {
         self.settings.lock().unwrap().clone()
@@ -151,33 +292,102 @@ impl Runtime {
         self.preferences().save(&self.settings_path)
     }
     pub fn request_refresh(&self) {
+        self.local_refresh.store(true, Ordering::Release);
         self.refresh.notify_one();
+    }
+
+    fn request_quota_refresh(&self) {
+        self.quota_refresh.notify_one();
     }
 
     pub fn update_settings(&self, settings: Settings) -> Result<(), String> {
         settings.save(&self.settings_path)?;
-        let previous = self.preferences();
-        let source_changed =
-            previous.roots != settings.roots || previous.executable != settings.executable;
-        *self.settings.lock().unwrap() = settings;
+        let (source_changed, state) = {
+            let mut preferences = self.settings.lock().unwrap();
+            let roots_changed = preferences.roots != settings.roots;
+            let source_changed = roots_changed || preferences.executable != settings.executable;
+            *preferences = settings;
+            let state = source_changed.then(|| {
+                let mut state = self.state.lock().unwrap();
+                let previous = state.snapshot.clone();
+                state.reset_sources(roots_changed);
+                Self::finish_change(&mut state.snapshot, previous)
+            });
+            (source_changed, state.flatten())
+        };
+        if let Some(state) = state {
+            (self.changed)(state);
+        }
         if source_changed {
             self.request_refresh();
         }
         Ok(())
     }
 
-    fn publish(&self, change: impl FnOnce(&mut Snapshot)) {
-        let state = {
+    fn finish_change(state: &mut Snapshot, previous: Snapshot) -> Option<Snapshot> {
+        if *state == previous {
+            return None;
+        }
+        state.revision += 1;
+        Some(state.clone())
+    }
+
+    fn update_state<T>(&self, change: impl FnOnce(&mut RuntimeState) -> T) -> T {
+        let (result, changed) = {
             let mut state = self.state.lock().unwrap();
-            let previous = state.clone();
-            change(&mut state);
-            if *state == previous {
-                return;
-            }
-            state.revision += 1;
-            state.clone()
+            let previous = state.snapshot.clone();
+            let result = change(&mut state);
+            let changed = Self::finish_change(&mut state.snapshot, previous);
+            (result, changed)
         };
-        (self.changed)(state);
+        if let Some(state) = changed {
+            (self.changed)(state);
+        }
+        result
+    }
+
+    fn source_configuration(&self) -> (Settings, u64) {
+        let settings = self.settings.lock().unwrap().clone();
+        let generation = self.state.lock().unwrap().generation;
+        (settings, generation)
+    }
+
+    fn publish_generation(&self, generation: u64, change: impl FnOnce(&mut Snapshot)) {
+        self.update_state(|state| {
+            if state.generation == generation {
+                change(&mut state.snapshot);
+            }
+        });
+    }
+
+    fn publish_account(
+        &self,
+        generation: u64,
+        mode: &str,
+        account: String,
+        provider: Option<String>,
+        at: i64,
+    ) -> Option<QuotaOwner> {
+        self.update_state(|state| state.observe_account(generation, mode, account, provider, at))
+    }
+
+    fn publish_local(
+        &self,
+        generation: u64,
+        sessions: Vec<crate::status::Session>,
+        local_error: Option<String>,
+        quotas: Vec<crate::status::Quota>,
+        observed_at: Option<i64>,
+    ) {
+        self.update_state(|state| {
+            state.observe_local(generation, sessions, local_error, quotas, observed_at);
+        });
+    }
+
+    fn publish_rpc(&self, owner: &QuotaOwner, quotas: Vec<crate::status::Quota>, at: i64) {
+        self.update_state(|state| {
+            state.observe_rpc(owner, quotas, at);
+        });
     }
 
     pub fn start(self: &Arc<Self>) {
@@ -227,11 +437,19 @@ impl Runtime {
         let mut roots: Vec<String> = Vec::new();
         let mut local = local::Local::default();
         let mut reconcile = Instant::now() - Duration::from_secs(60);
+        let mut tracked_refresh = Instant::now();
         let mut source = QuotaSource::None;
+        let mut local_quota_at = None;
+        let mut generation = u64::MAX;
         let mut pending = None;
         while !self.stop.load(Ordering::Relaxed) {
             let mut dirty = false;
-            let preferences = self.preferences();
+            let (preferences, next_generation) = self.source_configuration();
+            if generation != next_generation {
+                generation = next_generation;
+                local_quota_at = None;
+                dirty = true;
+            }
             if roots != preferences.roots {
                 if let Some(watcher) = watcher.as_mut() {
                     for root in &roots {
@@ -249,13 +467,18 @@ impl Runtime {
             }
             let next_source = {
                 let state = self.state.lock().unwrap();
-                quota_source(&state.account)
+                state
+                    .quota_owner
+                    .as_ref()
+                    .map(|owner| owner.source)
+                    .unwrap_or(QuotaSource::None)
             };
             if source != next_source {
                 source = next_source;
                 dirty = true;
             }
             let mut changes = drain(&receive, &lost);
+            changes.reconcile |= self.local_refresh.swap(false, Ordering::AcqRel);
             if let Some(event) = pending.take() {
                 changes.push(event);
             }
@@ -287,26 +510,25 @@ impl Runtime {
                 reconcile = Instant::now();
                 dirty = true;
             }
+            if tracked_refresh.elapsed() >= TRACKED_REFRESH {
+                dirty |= local.refresh_tracked(&roots, &|| self.stop.load(Ordering::Relaxed));
+                tracked_refresh = Instant::now();
+            }
             if dirty {
                 let sessions = local.snapshot();
                 let local_error = local.error.clone();
                 let (quotas, observed_at) = local.quotas(roots.first().map(String::as_str));
-                self.publish(move |state| {
-                    state.sessions = sessions;
-                    state.local_error = local_error;
-                    if prefer_local_quotas(source, observed_at, quotas_observed_at(&state.quotas)) {
-                        state.quotas = quotas;
-                        if observed_at.is_some() {
-                            state.updated_at = observed_at;
-                        }
-                    }
-                });
+                let refresh_rpc = local_quota_advanced(source, observed_at, &mut local_quota_at);
+                self.publish_local(generation, sessions, local_error, quotas, observed_at);
+                if refresh_rpc {
+                    self.request_quota_refresh();
+                }
             }
-            pending = match receive.recv_timeout(Duration::from_millis(250)) {
+            pending = match receive.recv_timeout(WATCH_WAIT) {
                 Ok(event) => Some(event),
                 Err(mpsc::RecvTimeoutError::Timeout) => None,
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    std::thread::sleep(Duration::from_millis(250));
+                    std::thread::sleep(WATCH_WAIT);
                     None
                 }
             };
@@ -323,17 +545,16 @@ impl Runtime {
             if self.stop.load(Ordering::Relaxed) {
                 break;
             }
-            let settings = self.preferences();
-            let signature = (settings.executable.clone(), settings.roots.first().cloned());
+            let (settings, generation) = self.source_configuration();
+            let signature = (
+                generation,
+                settings.executable.clone(),
+                settings.roots.first().cloned(),
+            );
             if configuration.as_ref() != Some(&signature) {
                 if let Some(rpc) = client.take() {
                     rpc::Rpc::close(rpc).await;
                 }
-                self.publish(|state| {
-                    state.quotas.clear();
-                    state.account = "unknown".into();
-                    state.provider = None;
-                });
                 configuration = Some(signature);
                 failures = 0;
                 auth_paused = false;
@@ -342,10 +563,11 @@ impl Runtime {
                 tokio::select! {
                     _ = self.shutdown.notified() => break,
                     _ = self.refresh.notified() => auth_paused = false,
+                    _ = self.quota_refresh.notified() => auth_paused = false,
                 }
                 continue;
             }
-            self.publish(|state| {
+            self.publish_generation(generation, |state| {
                 state.refreshing = true;
                 state.connection = "connecting".into();
             });
@@ -362,25 +584,21 @@ impl Runtime {
                 let rpc = client.as_mut().ok_or("source-unavailable")?;
                 let account = rpc.call("account/read").await?;
                 let mode = account_mode(&account);
-                let quota_source = quota_source(mode);
+                let source = quota_source(mode);
                 let provider = (mode == "externalProvider")
                     .then(|| config::provider(settings.roots.first().map(String::as_str)))
                     .flatten();
-                self.publish(|state| {
-                    state.account = mode.into();
-                    state.provider = provider;
-                });
-                if quota_source != QuotaSource::Rpc {
-                    self.publish(|state| {
-                        if quota_source == QuotaSource::None {
-                            state.quotas.clear();
-                        }
-                        state.connection = mode.into();
-                        state.error = None;
-                        if quota_source == QuotaSource::None {
-                            state.updated_at = Some(chrono::Utc::now().timestamp_millis());
-                        }
-                    });
+                let now = chrono::Utc::now().timestamp_millis();
+                let Some(owner) = self.publish_account(
+                    generation,
+                    mode,
+                    account_identity(&account),
+                    provider,
+                    now,
+                ) else {
+                    return Ok::<(), String>(());
+                };
+                if source != QuotaSource::Rpc {
                     if mode == "signedOut" {
                         auth_paused = true;
                     }
@@ -388,21 +606,25 @@ impl Runtime {
                 }
                 let limits = rpc.call("account/rateLimits/read").await?;
                 let now = chrono::Utc::now().timestamp_millis();
-                self.publish(|state| {
-                    state.quotas = rpc::quotas(&limits, now);
-                    state.connection = "connected".into();
-                    state.error = None;
-                    state.updated_at = Some(now);
-                });
+                self.publish_rpc(&owner, rpc::quotas(&limits, now), now);
                 Ok(())
             };
-            let result = tokio::select! { result = operation => result, _ = self.shutdown.notified() => break };
+            let result = tokio::select! {
+                result = operation => result,
+                _ = self.shutdown.notified() => break,
+                _ = self.refresh.notified() => {
+                    if let Some(rpc) = client.take() {
+                        rpc.close().await;
+                    }
+                    continue;
+                }
+            };
             if let Err(error) = result {
                 failures = failures.saturating_add(1);
                 if error == "auth-required" {
                     auth_paused = true;
                 }
-                self.publish(|state| {
+                self.publish_generation(generation, |state| {
                     state.connection = "offline".into();
                     state.error = Some(error);
                     for bucket in &mut state.quotas {
@@ -419,7 +641,7 @@ impl Runtime {
             } else {
                 failures = 0;
             }
-            self.publish(|state| {
+            self.publish_generation(generation, |state| {
                 state.refreshing = false;
             });
             if auth_paused {
@@ -434,21 +656,21 @@ impl Runtime {
                 60
             };
             last_query = Instant::now();
-            let manually_refreshed = tokio::select! {
+            let wake = tokio::select! {
                 _ = self.shutdown.notified() => break,
-                _ = self.refresh.notified() => true,
-                _ = tokio::time::sleep(Duration::from_secs(interval)) => false,
+                _ = self.refresh.notified() => QueryWake::Manual,
+                _ = self.quota_refresh.notified() => QueryWake::Automatic,
+                _ = tokio::time::sleep(Duration::from_secs(interval)) => QueryWake::Scheduled,
             };
-            if manually_refreshed {
-                let throttle = Duration::from_secs(3).saturating_sub(last_query.elapsed());
-                if !throttle.is_zero() {
-                    tokio::select! {
-                        _ = self.shutdown.notified() => break,
-                        _ = tokio::time::sleep(throttle) => {}
-                    }
+            let throttle = quota_refresh_throttle(wake, last_query.elapsed());
+            if !throttle.is_zero() {
+                tokio::select! {
+                    _ = self.shutdown.notified() => break,
+                    _ = self.refresh.notified() => {},
+                    _ = tokio::time::sleep(throttle) => {}
                 }
             }
-            self.publish(|state| {
+            self.publish_generation(generation, |state| {
                 let now = chrono::Utc::now().timestamp_millis();
                 for bucket in &mut state.quotas {
                     for window in &mut bucket.windows {

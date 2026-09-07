@@ -13,7 +13,7 @@
 
 每次向 `main` 推送和提交 PR，都会通过可复用的 `Build target` 工作流构建四个目标。每个任务校验 runner、项目版本、代码检查、构建结果、产物格式、名称和校验和。
 
-匹配 `vX.Y.Z` 的 tag 会重新构建矩阵，并自动公开包含一个 Windows 可执行文件、一个 Linux 安装包、两个 macOS 磁盘映像、四个 `.sha256` 文件和 `LICENSE` 的 GitHub Release。
+匹配 `vX.Y.Z` 的 tag 会重新构建矩阵，并自动公开包含一个 Windows 可执行文件、一个 Linux 安装包、两个 macOS 磁盘映像和四个 `.sha256` 文件的 GitHub Release。
 
 ## 发布闸门
 
@@ -71,6 +71,6 @@ spctl --assess --type execute --verbose=2 <mounted-app>
 
    推送 tag 后将自动公开发布。不要移动或覆盖已有发布 tag；应提升项目版本并创建新 tag。tag 签名仍为可选项。
 
-5. 等待公开 Release 生成，核对四个发布产物、四个校验和及 `LICENSE`。在每个目标上复核校验和、安装与启动；配置 CI 签名后，还需复核 Windows 和 macOS 签名。
+5. 等待公开 Release 生成，核对四个发布产物及四个校验和。在每个目标上复核校验和、安装与启动；配置 CI 签名后，还需复核 Windows 和 macOS 签名。
 
 Linux `.deb` 面向 Ubuntu 22.04 构建，并声明 WebKitGTK 4.1 和 AppIndicator 运行时依赖。Wayland 下的置顶、全局位置和托盘行为取决于合成器，必须按支持的降级行为实测。

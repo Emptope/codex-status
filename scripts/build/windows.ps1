@@ -7,7 +7,9 @@ if (-not $installation) { throw 'Visual Studio C++ tools are required' }
 & (Join-Path $installation 'Common7\Tools\Launch-VsDevShell.ps1') -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
 Push-Location (Join-Path $PSScriptRoot '..\..')
 try {
-    $lockPath = Join-Path (Get-Location) '.build.lock'
+    $buildPath = Join-Path (Get-Location) 'build'
+    New-Item -ItemType Directory -Force -Path $buildPath | Out-Null
+    $lockPath = Join-Path $buildPath 'task.lock'
     $lockToken = "windows:${PID}:$([guid]::NewGuid())"
     try {
         $lock = [System.IO.File]::Open($lockPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read)

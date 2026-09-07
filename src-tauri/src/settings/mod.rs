@@ -21,8 +21,8 @@ pub enum ApprovalSound {
 #[serde(rename_all = "camelCase")]
 pub enum CompletionSound {
     Off,
-    Bell,
     #[default]
+    Bell,
     Ding,
 }
 
@@ -72,8 +72,8 @@ impl<'de> Deserialize<'de> for CompletionSound {
 #[serde(rename_all = "camelCase")]
 pub enum QuotaSound {
     Off,
-    #[default]
     Alert,
+    #[default]
     Battery,
 }
 
@@ -112,8 +112,8 @@ impl Default for Settings {
             selected_bucket: None,
             notifications: true,
             approval_sound: ApprovalSound::Bell,
-            completion_sound: CompletionSound::Ding,
-            quota_sound: QuotaSound::Alert,
+            completion_sound: CompletionSound::Bell,
+            quota_sound: QuotaSound::Battery,
             muted: false,
             low_quota: 10,
             position: None,
@@ -220,7 +220,8 @@ mod tests {
         let path = dir.path().join("settings.json");
         let mut settings = Settings::default();
         assert_eq!(settings.approval_sound, ApprovalSound::Bell);
-        assert_eq!(settings.completion_sound, CompletionSound::Ding);
+        assert_eq!(settings.completion_sound, CompletionSound::Bell);
+        assert_eq!(settings.quota_sound, QuotaSound::Battery);
         settings.save(&path).unwrap();
         settings.font_size = 15;
         settings.save(&path).unwrap();
@@ -240,8 +241,8 @@ mod tests {
         value.as_object_mut().unwrap().remove("quotaSound");
         let settings = serde_json::from_value::<Settings>(value).unwrap();
         assert_eq!(settings.approval_sound, ApprovalSound::Bell);
-        assert_eq!(settings.completion_sound, CompletionSound::Ding);
-        assert_eq!(settings.quota_sound, QuotaSound::Alert);
+        assert_eq!(settings.completion_sound, CompletionSound::Bell);
+        assert_eq!(settings.quota_sound, QuotaSound::Battery);
     }
 
     #[test]

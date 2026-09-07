@@ -10,7 +10,7 @@
   },
   "scripts": {
     "clean": "node scripts/build/clean.mjs",
-    "clean:cache": "cargo clean --manifest-path src-tauri/Cargo.toml",
+    "clean:cache": "node scripts/build/clean.mjs cache",
     "verify": "node scripts/build/tasks.mjs verify",
     "build": "node scripts/build/tasks.mjs build",
     "dev": "node scripts/build/tasks.mjs dev",

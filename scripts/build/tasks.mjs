@@ -1,15 +1,18 @@
+import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { cargoTarget, runWithNormalizedTimes } from './cargo.mjs';
 import { cleanBuild, root } from './clean.mjs';
 import { acquireBuildLock } from './lock.mjs';
+import { buildLayout, inBuild } from './layout.mjs';
 import { normalizeColorEnv, start, startPackage } from './process.mjs';
-import { bundleArgs, clearArtifact, stageArtifact } from './release.mjs';
+import { bundleArgs, stageArtifact } from './release.mjs';
 import { projectMetadata, verifyArtifact } from './validate.mjs';
 
 const task = process.argv[2];
 if (!['verify', 'build', 'dev', 'preview'].includes(task)) throw new Error('Unknown task');
-const lockPath = join(root, '.build.lock');
+const lockPath = inBuild(root, buildLayout.lock);
+await mkdir(inBuild(root, buildLayout.root), { recursive: true });
 const releaseLock = await acquireBuildLock(lockPath);
 const jobs = new Set();
 const env = normalizeColorEnv({ ...process.env, CARGO_TARGET_DIR: cargoTarget(root) });
@@ -78,7 +81,7 @@ process.once('SIGINT', interrupt);
 process.once('SIGTERM', interrupt);
 let failure;
 try {
-  await cleanBuild({ preserveArtifacts: true });
+  await cleanBuild({ preserveArtifacts: task !== 'build' });
   const metadata = await projectMetadata(root);
   if (task === 'verify') {
     await runPackage(['run', 'lint:actions']);
@@ -127,7 +130,6 @@ try {
     await runPackage(['exec', 'vitest', 'run']);
     await runPackage(['exec', 'playwright', 'test']);
   } else if (task === 'build') {
-    await clearArtifact(root, metadata);
     await runPackage(['exec', 'vite', 'build']);
     await runPackageBuild(['exec', 'tauri', 'build', ...bundleArgs()]);
     const artifact = await stageArtifact(root, env.CARGO_TARGET_DIR, metadata);
@@ -140,6 +142,7 @@ try {
     await ready('http://127.0.0.1:1420', vite);
     await runPackageBuild(['exec', 'tauri', 'dev']);
   } else {
+    await mkdir(inBuild(root, buildLayout.preview), { recursive: true });
     await runBuild('cargo', [
       'build',
       '--manifest-path',

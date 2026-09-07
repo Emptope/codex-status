@@ -410,18 +410,18 @@ mod tests {
             delivery(&settings, AlertKind::Completion),
             Delivery {
                 notification: false,
-                sound: Some(Sound::CompletionDing),
+                sound: Some(Sound::CompletionBell),
             }
         );
         assert_eq!(delivery(&settings, AlertKind::Status).sound, None);
-        settings.completion_sound = CompletionSound::Bell;
+        settings.completion_sound = CompletionSound::Ding;
         assert_eq!(
             delivery(&settings, AlertKind::Completion).sound,
-            Some(Sound::CompletionBell)
+            Some(Sound::CompletionDing)
         );
         settings.completion_sound = CompletionSound::Off;
         assert_eq!(delivery(&settings, AlertKind::Completion).sound, None);
-        settings.completion_sound = CompletionSound::Ding;
+        settings.completion_sound = CompletionSound::Bell;
         settings.muted = true;
         assert_eq!(delivery(&settings, AlertKind::Completion).sound, None);
     }
@@ -456,13 +456,13 @@ mod tests {
             delivery(&settings, AlertKind::Quota),
             Delivery {
                 notification: false,
-                sound: Some(Sound::QuotaAlert),
+                sound: Some(Sound::QuotaBattery),
             }
         );
-        settings.quota_sound = QuotaSound::Battery;
+        settings.quota_sound = QuotaSound::Alert;
         assert_eq!(
             delivery(&settings, AlertKind::Quota).sound,
-            Some(Sound::QuotaBattery)
+            Some(Sound::QuotaAlert)
         );
         settings.quota_sound = QuotaSound::Off;
         assert_eq!(delivery(&settings, AlertKind::Quota).sound, None);
