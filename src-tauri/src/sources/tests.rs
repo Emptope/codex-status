@@ -208,16 +208,17 @@ fn each_account_mode_has_one_authoritative_quota_owner() {
     let mut state = RuntimeState::new(Snapshot::default());
     let rpc_owner = state
         .observe_account(0, "chatgpt", "account-a".into(), None, 1)
+        .0
         .unwrap();
     assert!(state.observe_rpc(&rpc_owner, vec![quota("appServer", 100, 80.0)], 100));
 
-    assert!(state.observe_local(
+    state.observe_local(
         0,
         Vec::new(),
         None,
         vec![quota("local", 200, 10.0)],
         Some(200),
-    ));
+    );
     assert_eq!(
         state.snapshot.quotas[0].windows[0].remaining.source,
         "appServer"
@@ -229,6 +230,7 @@ fn each_account_mode_has_one_authoritative_quota_owner() {
 
     state
         .observe_account(0, "apiKey", "account-b".into(), None, 201)
+        .0
         .unwrap();
     assert!(state.snapshot.quotas.is_empty());
     assert!(!state.observe_rpc(&rpc_owner, vec![quota("appServer", 202, 70.0)], 202));
@@ -246,6 +248,7 @@ fn each_account_mode_has_one_authoritative_quota_owner() {
 
     state
         .observe_account(0, "signedOut", "signed-out".into(), None, 203)
+        .0
         .unwrap();
     assert!(state.snapshot.quotas.is_empty());
 }
@@ -255,11 +258,13 @@ fn account_and_configuration_changes_reject_stale_quota_results() {
     let mut state = RuntimeState::new(Snapshot::default());
     let old_owner = state
         .observe_account(0, "chatgpt", "account-a".into(), None, 1)
+        .0
         .unwrap();
     assert!(state.observe_rpc(&old_owner, vec![quota("appServer", 2, 90.0)], 2));
 
     let new_owner = state
         .observe_account(0, "chatgpt", "account-b".into(), None, 3)
+        .0
         .unwrap();
     assert!(state.snapshot.quotas.is_empty());
     assert!(!state.observe_rpc(&old_owner, vec![quota("appServer", 4, 80.0)], 4));

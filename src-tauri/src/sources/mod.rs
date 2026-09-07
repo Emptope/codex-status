@@ -72,9 +72,18 @@ impl RuntimeState {
         }
     }
 
-    fn reset_sources(&mut self, roots_changed: bool) {
+    fn reset_sources(&mut self, roots_changed: bool) -> bool {
         self.generation = self.generation.wrapping_add(1);
         self.quota_owner = None;
+        let changed = !self.snapshot.quotas.is_empty()
+            || self.snapshot.account != "unknown"
+            || self.snapshot.provider.is_some()
+            || self.snapshot.updated_at.is_some()
+            || self.snapshot.error.is_some()
+            || self.snapshot.connection != "connecting"
+            || self.snapshot.refreshing
+            || roots_changed
+                && (!self.snapshot.sessions.is_empty() || self.snapshot.local_error.is_some());
         self.snapshot.quotas.clear();
         self.snapshot.account = "unknown".into();
         self.snapshot.provider = None;
@@ -86,6 +95,7 @@ impl RuntimeState {
             self.snapshot.sessions.clear();
             self.snapshot.local_error = None;
         }
+        changed
     }
 
     fn observe_account(
@@ -95,32 +105,45 @@ impl RuntimeState {
         account: String,
         provider: Option<String>,
         at: i64,
-    ) -> Option<QuotaOwner> {
+    ) -> (Option<QuotaOwner>, bool) {
         if generation != self.generation {
-            return None;
+            return (None, false);
         }
         let owner = QuotaOwner {
             generation,
             source: quota_source(mode),
             account,
         };
-        if self.quota_owner.as_ref() != Some(&owner) {
+        let owner_changed = self.quota_owner.as_ref() != Some(&owner);
+        let source = owner.source;
+        let connection = match source {
+            QuotaSource::Rpc => "connecting",
+            QuotaSource::Local => mode,
+            QuotaSource::None => mode,
+        };
+        let updated_at = if source == QuotaSource::None {
+            Some(at)
+        } else if owner_changed {
+            None
+        } else {
+            self.snapshot.updated_at
+        };
+        let changed = owner_changed && !self.snapshot.quotas.is_empty()
+            || self.snapshot.account != mode
+            || self.snapshot.provider != provider
+            || self.snapshot.updated_at != updated_at
+            || self.snapshot.error.is_some()
+            || self.snapshot.connection != connection;
+        if owner_changed {
             self.snapshot.quotas.clear();
-            self.snapshot.updated_at = None;
         }
         self.quota_owner = Some(owner.clone());
         self.snapshot.account = mode.into();
         self.snapshot.provider = provider;
+        self.snapshot.updated_at = updated_at;
         self.snapshot.error = None;
-        match owner.source {
-            QuotaSource::Rpc => self.snapshot.connection = "connecting".into(),
-            QuotaSource::Local => self.snapshot.connection = mode.into(),
-            QuotaSource::None => {
-                self.snapshot.connection = mode.into();
-                self.snapshot.updated_at = Some(at);
-            }
-        }
-        Some(owner)
+        self.snapshot.connection = connection.into();
+        (Some(owner), changed)
     }
 
     fn observe_local(
@@ -134,17 +157,29 @@ impl RuntimeState {
         if generation != self.generation {
             return false;
         }
-        self.snapshot.sessions = sessions;
-        self.snapshot.local_error = local_error;
-        if self.quota_owner.as_ref().is_some_and(|owner| {
+        let owns_quota = self.quota_owner.as_ref().is_some_and(|owner| {
             owner.generation == generation && owner.source == QuotaSource::Local
-        }) {
-            self.snapshot.quotas = quotas;
+        });
+        let changed = self.snapshot.sessions != sessions
+            || self.snapshot.local_error != local_error
+            || owns_quota
+                && (self.snapshot.quotas != quotas
+                    || observed_at.is_some() && self.snapshot.updated_at != observed_at);
+        if self.snapshot.sessions != sessions {
+            self.snapshot.sessions = sessions;
+        }
+        if self.snapshot.local_error != local_error {
+            self.snapshot.local_error = local_error;
+        }
+        if owns_quota {
+            if self.snapshot.quotas != quotas {
+                self.snapshot.quotas = quotas;
+            }
             if observed_at.is_some() {
                 self.snapshot.updated_at = observed_at;
             }
         }
-        true
+        changed
     }
 
     fn observe_rpc(
@@ -159,11 +194,17 @@ impl RuntimeState {
         {
             return false;
         }
-        self.snapshot.quotas = quotas;
+        let changed = self.snapshot.quotas != quotas
+            || self.snapshot.connection != "connected"
+            || self.snapshot.error.is_some()
+            || self.snapshot.updated_at != Some(at);
+        if self.snapshot.quotas != quotas {
+            self.snapshot.quotas = quotas;
+        }
         self.snapshot.connection = "connected".into();
         self.snapshot.error = None;
         self.snapshot.updated_at = Some(at);
-        true
+        changed
     }
 }
 
@@ -309,9 +350,8 @@ impl Runtime {
             *preferences = settings;
             let state = source_changed.then(|| {
                 let mut state = self.state.lock().unwrap();
-                let previous = state.snapshot.clone();
-                state.reset_sources(roots_changed);
-                Self::finish_change(&mut state.snapshot, previous)
+                let changed = state.reset_sources(roots_changed);
+                Self::finish_change(&mut state.snapshot, changed)
             });
             (source_changed, state.flatten())
         };
@@ -324,20 +364,19 @@ impl Runtime {
         Ok(())
     }
 
-    fn finish_change(state: &mut Snapshot, previous: Snapshot) -> Option<Snapshot> {
-        if *state == previous {
+    fn finish_change(state: &mut Snapshot, changed: bool) -> Option<Snapshot> {
+        if !changed {
             return None;
         }
         state.revision += 1;
         Some(state.clone())
     }
 
-    fn update_state<T>(&self, change: impl FnOnce(&mut RuntimeState) -> T) -> T {
+    fn update_state<T>(&self, change: impl FnOnce(&mut RuntimeState) -> (T, bool)) -> T {
         let (result, changed) = {
             let mut state = self.state.lock().unwrap();
-            let previous = state.snapshot.clone();
-            let result = change(&mut state);
-            let changed = Self::finish_change(&mut state.snapshot, previous);
+            let (result, modified) = change(&mut state);
+            let changed = Self::finish_change(&mut state.snapshot, modified);
             (result, changed)
         };
         if let Some(state) = changed {
@@ -347,15 +386,29 @@ impl Runtime {
     }
 
     fn source_configuration(&self) -> (Settings, u64) {
-        let settings = self.settings.lock().unwrap().clone();
+        let settings = self.settings.lock().unwrap();
         let generation = self.state.lock().unwrap().generation;
-        (settings, generation)
+        (settings.clone(), generation)
     }
 
-    fn publish_generation(&self, generation: u64, change: impl FnOnce(&mut Snapshot)) {
+    fn local_configuration(&self) -> (u64, QuotaSource) {
+        let state = self.state.lock().unwrap();
+        (
+            state.generation,
+            state
+                .quota_owner
+                .as_ref()
+                .map(|owner| owner.source)
+                .unwrap_or(QuotaSource::None),
+        )
+    }
+
+    fn publish_generation(&self, generation: u64, change: impl FnOnce(&mut Snapshot) -> bool) {
         self.update_state(|state| {
             if state.generation == generation {
-                change(&mut state.snapshot);
+                ((), change(&mut state.snapshot))
+            } else {
+                ((), false)
             }
         });
     }
@@ -368,7 +421,10 @@ impl Runtime {
         provider: Option<String>,
         at: i64,
     ) -> Option<QuotaOwner> {
-        self.update_state(|state| state.observe_account(generation, mode, account, provider, at))
+        self.update_state(|state| {
+            let (owner, changed) = state.observe_account(generation, mode, account, provider, at);
+            (owner, changed)
+        })
     }
 
     fn publish_local(
@@ -380,13 +436,16 @@ impl Runtime {
         observed_at: Option<i64>,
     ) {
         self.update_state(|state| {
-            state.observe_local(generation, sessions, local_error, quotas, observed_at);
+            let changed =
+                state.observe_local(generation, sessions, local_error, quotas, observed_at);
+            ((), changed)
         });
     }
 
     fn publish_rpc(&self, owner: &QuotaOwner, quotas: Vec<crate::status::Quota>, at: i64) {
         self.update_state(|state| {
-            state.observe_rpc(owner, quotas, at);
+            let changed = state.observe_rpc(owner, quotas, at);
+            ((), changed)
         });
     }
 
@@ -444,35 +503,28 @@ impl Runtime {
         let mut pending = None;
         while !self.stop.load(Ordering::Relaxed) {
             let mut dirty = false;
-            let (preferences, next_generation) = self.source_configuration();
+            let (next_generation, mut next_source) = self.local_configuration();
             if generation != next_generation {
-                generation = next_generation;
+                let (preferences, configured_generation) = self.source_configuration();
+                generation = configured_generation;
                 local_quota_at = None;
                 dirty = true;
-            }
-            if roots != preferences.roots {
-                if let Some(watcher) = watcher.as_mut() {
-                    for root in &roots {
-                        let _ = watcher.unwatch(&Path::new(root).join("sessions"));
+                if roots != preferences.roots {
+                    if let Some(watcher) = watcher.as_mut() {
+                        for root in &roots {
+                            let _ = watcher.unwatch(&Path::new(root).join("sessions"));
+                        }
+                        for root in &preferences.roots {
+                            let _ = watcher
+                                .watch(&Path::new(root).join("sessions"), RecursiveMode::Recursive);
+                        }
                     }
-                    for root in &preferences.roots {
-                        let _ = watcher
-                            .watch(&Path::new(root).join("sessions"), RecursiveMode::Recursive);
-                    }
+                    roots = preferences.roots;
+                    local = local::Local::default();
+                    reconcile = Instant::now() - Duration::from_secs(60);
                 }
-                roots = preferences.roots;
-                local = local::Local::default();
-                reconcile = Instant::now() - Duration::from_secs(60);
-                dirty = true;
+                next_source = self.local_configuration().1;
             }
-            let next_source = {
-                let state = self.state.lock().unwrap();
-                state
-                    .quota_owner
-                    .as_ref()
-                    .map(|owner| owner.source)
-                    .unwrap_or(QuotaSource::None)
-            };
             if source != next_source {
                 source = next_source;
                 dirty = true;
@@ -568,8 +620,10 @@ impl Runtime {
                 continue;
             }
             self.publish_generation(generation, |state| {
+                let changed = !state.refreshing || state.connection != "connecting";
                 state.refreshing = true;
                 state.connection = "connecting".into();
+                changed
             });
             let operation = async {
                 if client.is_none() {
@@ -625,6 +679,14 @@ impl Runtime {
                     auth_paused = true;
                 }
                 self.publish_generation(generation, |state| {
+                    let changed = state.connection != "offline"
+                        || state.error.as_deref() != Some(error.as_str())
+                        || state.quotas.iter().any(|bucket| {
+                            bucket.windows.iter().any(|window| {
+                                window.remaining.value.is_some()
+                                    && window.remaining.quality != Quality::Stale
+                            })
+                        });
                     state.connection = "offline".into();
                     state.error = Some(error);
                     for bucket in &mut state.quotas {
@@ -634,6 +696,7 @@ impl Runtime {
                             }
                         }
                     }
+                    changed
                 });
                 if let Some(rpc) = client.take() {
                     rpc.close().await;
@@ -642,7 +705,9 @@ impl Runtime {
                 failures = 0;
             }
             self.publish_generation(generation, |state| {
+                let changed = state.refreshing;
                 state.refreshing = false;
+                changed
             });
             if auth_paused {
                 continue;
@@ -672,15 +737,19 @@ impl Runtime {
             }
             self.publish_generation(generation, |state| {
                 let now = chrono::Utc::now().timestamp_millis();
+                let mut changed = false;
                 for bucket in &mut state.quotas {
                     for window in &mut bucket.windows {
                         if window.resets_at.is_some_and(|at| at <= now)
                             && window.remaining.value.is_some()
+                            && window.remaining.quality != Quality::Stale
                         {
                             window.remaining.quality = Quality::Stale;
+                            changed = true;
                         }
                     }
                 }
+                changed
             });
         }
         if let Some(rpc) = client {

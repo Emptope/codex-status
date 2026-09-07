@@ -61,6 +61,19 @@ export function countdown(at: number | null, now: number): string {
   if (minutes < 1440) return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
   return `${Math.floor(minutes / 1440)}d ${Math.floor((minutes % 1440) / 60)}h`;
 }
+export function nextCountdownUpdate(
+  resetsAt: Array<number | null | undefined>,
+  now: number,
+): number | null {
+  let delay = Number.POSITIVE_INFINITY;
+  for (const at of resetsAt) {
+    if (at === null || at === undefined || at <= now) continue;
+    const remaining = at - now;
+    const minutes = Math.ceil(remaining / 60_000);
+    delay = Math.min(delay, remaining - (minutes - 1) * 60_000);
+  }
+  return Number.isFinite(delay) ? Math.max(1, delay) : null;
+}
 export function number(value: number | null | undefined): string {
   return value === null || value === undefined
     ? 'Unknown'

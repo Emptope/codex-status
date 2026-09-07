@@ -144,11 +144,14 @@ fn set_visible(app: &tauri::AppHandle, visible: bool) {
         }
     }
     let state = app.state::<AppState>();
-    state.runtime.hidden.store(!visible, Ordering::Relaxed);
+    let was_hidden = state.runtime.hidden.swap(!visible, Ordering::Relaxed);
     if let Ok(item) = state.visibility.lock()
         && let Some(item) = item.as_ref()
     {
         let _ = item.set_checked(visible);
+    }
+    if visible && was_hidden {
+        let _ = app.emit("status", state.runtime.snapshot());
     }
 }
 
@@ -280,16 +283,29 @@ pub fn run() {
             sound::prepare(&handle);
             let path = app.path().app_config_dir()?.join("settings.json");
             let runtime = Runtime::new(path, move |snapshot| {
-                let _ = handle.emit("status", &snapshot);
                 if let Some(state) = handle.try_state::<AppState>() {
-                    let preferences = state.runtime.preferences();
-                    let alerts = state
-                        .alerts
+                    if !state.runtime.hidden.load(Ordering::Relaxed) {
+                        let _ = handle.emit("status", &snapshot);
+                    }
+                    let deliveries = state
+                        .runtime
+                        .settings
                         .lock()
-                        .map(|mut alerts| alerts.observe(&snapshot, preferences.low_quota))
+                        .ok()
+                        .and_then(|preferences| {
+                            state.alerts.lock().ok().map(|mut alerts| {
+                                alerts
+                                    .observe(&snapshot, preferences.low_quota)
+                                    .into_iter()
+                                    .map(|alert| {
+                                        let delivery = delivery(&preferences, alert.kind);
+                                        (alert, delivery)
+                                    })
+                                    .collect::<Vec<_>>()
+                            })
+                        })
                         .unwrap_or_default();
-                    for alert in alerts {
-                        let delivery = delivery(&preferences, alert.kind);
+                    for (alert, delivery) in deliveries {
                         if let Some(sound) = delivery.sound {
                             sound::play(&handle, sound);
                         }

@@ -11,7 +11,14 @@
     BellOff,
   } from '@lucide/svelte';
   import { empty, defaults, type Snapshot, type Settings } from '../types/status';
-  import { activity, connectionLabel, error as errorLabel, percent, unit } from '../state/format';
+  import {
+    activity,
+    connectionLabel,
+    error as errorLabel,
+    nextCountdownUpdate,
+    percent,
+    unit,
+  } from '../state/format';
   import { command, drag, fit, native, resizeHeight, save, subscribe } from '../state/bridge';
   import { playSound } from '../state/sound';
   import Quota from './Quota.svelte';
@@ -31,6 +38,9 @@
   let fitting = 0;
   let resizeFrame = 0;
   let resizeValue = 0;
+  let clockTimer = 0;
+  let clockResets: Array<number | null> = [];
+  let mounted = false;
   let resizing: { pointer: number; y: number; height: number } | null = null;
   let content: HTMLElement;
   const session = $derived(
@@ -43,12 +53,9 @@
   const status = $derived(session?.activity.value || 'unknown');
   const connectionName = $derived(connectionLabel(snapshot.connection, snapshot.provider));
 
-  async function accept(next: Snapshot) {
+  function accept(next: Snapshot) {
     if (next.revision <= snapshot.revision) return;
-    if (snapshot.revision && next.revision > snapshot.revision + 1) {
-      const current = await command<Snapshot>('snapshot');
-      if (current.revision > snapshot.revision) snapshot = current;
-    } else snapshot = next;
+    snapshot = next;
     if (settings.autoFollow && view === 'summary') selected = snapshot.sessions[0]?.id || null;
   }
   async function apply(next: Settings) {
@@ -132,19 +139,33 @@
     const fillsWindow = Math.abs(content.getBoundingClientRect().height - innerHeight) <= 1;
     if (fitting === 0 || !fillsWindow) resized = true;
   }
+  function scheduleClock() {
+    if (clockTimer) clearTimeout(clockTimer);
+    clockTimer = 0;
+    const current = Date.now();
+    now = current;
+    if (!mounted || document.hidden) return;
+    const delay = nextCountdownUpdate(clockResets, current);
+    if (delay !== null) {
+      clockTimer = window.setTimeout(scheduleClock, Math.min(delay, 2_147_483_647));
+    }
+  }
+  function followVisibility() {
+    scheduleClock();
+  }
   onMount(() => {
     let dispose = () => {};
     let stopped = false;
-    const timer = setInterval(() => {
-      now = Date.now();
-    }, 1000);
+    mounted = true;
+    scheduleClock();
     const observer = new ResizeObserver(() => fitCard());
     observer.observe(content);
     window.addEventListener('resize', followWindow);
+    document.addEventListener('visibilitychange', followVisibility);
     void (async () => {
       dispose = await subscribe(
         (next) => {
-          void accept(next).catch(() => {});
+          accept(next);
         },
         () => {
           showView('settings');
@@ -169,10 +190,12 @@
     });
     return () => {
       stopped = true;
+      mounted = false;
       dispose();
       observer.disconnect();
       window.removeEventListener('resize', followWindow);
-      clearInterval(timer);
+      document.removeEventListener('visibilitychange', followVisibility);
+      if (clockTimer) clearTimeout(clockTimer);
       if (resizeFrame) cancelAnimationFrame(resizeFrame);
     };
   });
@@ -182,6 +205,12 @@
   });
   $effect(() => {
     fitCard(settings.collapsed, view);
+  });
+  $effect(() => {
+    clockResets = settings.collapsed
+      ? []
+      : bucket?.windows.slice(0, 2).map((window) => window.resetsAt) || [];
+    if (mounted) scheduleClock();
   });
 </script>
 

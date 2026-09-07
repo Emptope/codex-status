@@ -223,7 +223,16 @@ impl Cursor {
         }
     }
 
+    #[cfg(test)]
     pub fn read(&mut self, path: &Path) -> std::io::Result<(Vec<Value>, bool, bool)> {
+        self.read_into(path, &mut Vec::new())
+    }
+
+    fn read_into(
+        &mut self,
+        path: &Path,
+        bytes: &mut Vec<u8>,
+    ) -> std::io::Result<(Vec<Value>, bool, bool)> {
         let mut file = File::open(path)?;
         let metadata = file.metadata()?;
         #[cfg(unix)]
@@ -255,8 +264,8 @@ impl Cursor {
             file.read_exact(&mut self.prefix)?;
         }
         file.seek(SeekFrom::Start(self.offset))?;
-        let mut bytes = vec![0; CHUNK];
-        let count = file.read(&mut bytes)?;
+        bytes.clear();
+        let count = (&mut file).take(CHUNK as u64).read_to_end(bytes)?;
         self.offset += count as u64;
         let mut rows = Vec::new();
         for byte in &bytes[..count] {
@@ -288,6 +297,7 @@ pub struct Local {
     ignored: BTreeSet<PathBuf>,
     quotas: BTreeMap<(PathBuf, String), Limit>,
     modified: BTreeMap<PathBuf, (u64, Option<SystemTime>)>,
+    read_buffer: Vec<u8>,
     pub error: Option<String>,
 }
 
@@ -395,7 +405,7 @@ impl Local {
             if cancelled() {
                 return;
             }
-            match cursor.read(path) {
+            match cursor.read_into(path, &mut self.read_buffer) {
                 Ok((rows, reset, more)) => {
                     if reset {
                         self.sessions.remove(path);
@@ -452,20 +462,22 @@ impl Local {
     }
 
     pub fn refresh_tracked(&mut self, roots: &[String], cancelled: &impl Fn() -> bool) -> bool {
-        let paths: Vec<PathBuf> = self.cursors.keys().cloned().collect();
+        let paths: Vec<PathBuf> = self
+            .cursors
+            .keys()
+            .filter(|path| {
+                fs::symlink_metadata(path)
+                    .ok()
+                    .map(|meta| (meta.len(), meta.modified().ok()))
+                    .as_ref()
+                    .is_none_or(|signature| self.modified.get(*path) != Some(signature))
+            })
+            .cloned()
+            .collect();
         let mut changed = false;
         for path in paths {
             if cancelled() {
                 break;
-            }
-            let signature = fs::symlink_metadata(&path)
-                .ok()
-                .map(|meta| (meta.len(), meta.modified().ok()));
-            if signature
-                .as_ref()
-                .is_some_and(|signature| self.modified.get(&path) == Some(signature))
-            {
-                continue;
             }
             let Some(root) = roots
                 .iter()

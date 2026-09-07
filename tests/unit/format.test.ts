@@ -3,6 +3,7 @@ import {
   connectionLabel,
   countdown,
   duration,
+  nextCountdownUpdate,
   number,
   percent,
   time,
@@ -25,6 +26,14 @@ describe('status formatting', () => {
     expect(countdown(now + 61 * 60_000, now)).toBe('1h 1m');
     expect(time(null)).toBe('Unknown');
     expect(time(0)).not.toBe('Unknown');
+  });
+
+  it('schedules countdown work only when the visible minute changes', () => {
+    const now = Date.UTC(2026, 8, 5, 0, 0, 0);
+    expect(nextCountdownUpdate([null, now - 1], now)).toBeNull();
+    expect(nextCountdownUpdate([now + 30_000], now)).toBe(30_000);
+    expect(nextCountdownUpdate([now + 60_001], now)).toBe(1);
+    expect(nextCountdownUpdate([now + 150_000, now + 20_000], now)).toBe(20_000);
   });
 
   it('shows a verified external provider name', () => {
