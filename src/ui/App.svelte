@@ -25,7 +25,14 @@
   import Details from './Details.svelte';
   import Preferences from './Settings.svelte';
   import { shouldDrag } from './drag';
-  import { draggedHeight, viewWidth, type View } from './layout';
+  import {
+    draggedHeight,
+    framedHeight,
+    framedWidth,
+    shadowInsets,
+    viewWidth,
+    type View,
+  } from './layout';
 
   let snapshot = $state<Snapshot>(empty);
   let settings = $state<Settings>(defaults);
@@ -96,7 +103,7 @@
   }
   function resizeCardMove(event: PointerEvent) {
     if (!resizing || event.pointerId !== resizing.pointer) return;
-    resizeValue = draggedHeight(resizing.height, resizing.y, event.screenY);
+    resizeValue = draggedHeight(resizing.height, resizing.y, event.screenY, framedHeight(40));
     if (resizeFrame) return;
     resizeFrame = requestAnimationFrame(() => {
       resizeFrame = 0;
@@ -123,10 +130,9 @@
     const panel = !collapsed && currentView !== 'summary';
     if (!collapsed && resized) return;
     fitting += 1;
-    void fit(
-      collapsed ? 240 : viewWidth(currentView),
-      panel ? 480 : Math.max(40, Math.ceil(content.scrollHeight)),
-    )
+    const width = collapsed ? 240 : viewWidth(currentView);
+    const height = panel ? 480 : Math.max(40, Math.ceil(content.scrollHeight));
+    void fit(framedWidth(width), framedHeight(height))
       .catch(() => {})
       .finally(() => {
         requestAnimationFrame(() => {
@@ -136,7 +142,8 @@
   }
   function followWindow() {
     if (!native || settings.collapsed || resized || !content) return;
-    const fillsWindow = Math.abs(content.getBoundingClientRect().height - innerHeight) <= 1;
+    const fillsWindow =
+      Math.abs(framedHeight(content.getBoundingClientRect().height) - innerHeight) <= 1;
     if (fitting === 0 || !fillsWindow) resized = true;
   }
   function scheduleClock() {
@@ -216,9 +223,11 @@
 
 <main
   bind:this={content}
+  class:framed={native}
   class:collapsed={settings.collapsed}
   class:panel={!settings.collapsed && view !== 'summary'}
   class:resized
+  style={`--shadow-x: ${shadowInsets.horizontal}px; --shadow-top: ${shadowInsets.top}px; --shadow-bottom: ${shadowInsets.bottom}px`}
   onpointerdown={dragCard}
 >
   {#if settings.collapsed}

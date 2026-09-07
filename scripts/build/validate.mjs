@@ -65,6 +65,9 @@ export function validatePresence(tauriConfig) {
   if (windows.some((window) => window?.transparent !== true)) {
     throw new Error('Every desktop window must enable transparency for rounded cards');
   }
+  if (windows.some((window) => window?.shadow !== false)) {
+    throw new Error('Every desktop window must disable the native frame shadow');
+  }
   if (tauriConfig.app?.macOSPrivateApi !== true) {
     throw new Error('macOS private API must be enabled for transparent rounded cards');
   }

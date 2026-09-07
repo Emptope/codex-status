@@ -106,6 +106,14 @@ main {
   overflow: hidden;
 }
 
+main.framed {
+  width: calc(100% - var(--shadow-x) - var(--shadow-x));
+  margin: var(--shadow-top) var(--shadow-x) var(--shadow-bottom);
+  box-shadow:
+    0 7px 20px rgb(0 0 0 / 32%),
+    0 2px 6px rgb(0 0 0 / 24%);
+}
+
 main.panel {
   display: flex;
   height: min(480px, 100vh);
@@ -113,8 +121,16 @@ main.panel {
   overflow: hidden;
 }
 
+main.panel.framed {
+  height: min(480px, calc(100vh - var(--shadow-top) - var(--shadow-bottom)));
+}
+
 main.resized {
   height: 100vh;
+}
+
+main.resized.framed {
+  height: calc(100vh - var(--shadow-top) - var(--shadow-bottom));
 }
 
 main.resized:not(.panel) {

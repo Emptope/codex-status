@@ -67,8 +67,8 @@ test('desktop windows stay out of the taskbar', () => {
       app: {
         macOSPrivateApi: true,
         windows: [
-          { skipTaskbar: true, transparent: true },
-          { skipTaskbar: true, transparent: true },
+          { skipTaskbar: true, transparent: true, shadow: false },
+          { skipTaskbar: true, transparent: true, shadow: false },
         ],
       },
     }),
@@ -77,16 +77,32 @@ test('desktop windows stay out of the taskbar', () => {
   assert.throws(
     () =>
       validatePresence({
-        app: { macOSPrivateApi: true, windows: [{ skipTaskbar: true, transparent: true }, {}] },
+        app: {
+          macOSPrivateApi: true,
+          windows: [{ skipTaskbar: true, transparent: true, shadow: false }, {}],
+        },
       }),
     /skipTaskbar/,
   );
   assert.throws(
-    () => validatePresence({ app: { macOSPrivateApi: true, windows: [{ skipTaskbar: true }] } }),
+    () =>
+      validatePresence({
+        app: { macOSPrivateApi: true, windows: [{ skipTaskbar: true, shadow: false }] },
+      }),
     /transparency/,
   );
   assert.throws(
-    () => validatePresence({ app: { windows: [{ skipTaskbar: true, transparent: true }] } }),
+    () =>
+      validatePresence({
+        app: { macOSPrivateApi: true, windows: [{ skipTaskbar: true, transparent: true }] },
+      }),
+    /native frame shadow/,
+  );
+  assert.throws(
+    () =>
+      validatePresence({
+        app: { windows: [{ skipTaskbar: true, transparent: true, shadow: false }] },
+      }),
     /macOS private API/,
   );
 });

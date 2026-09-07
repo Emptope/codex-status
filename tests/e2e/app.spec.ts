@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { buildLayout } from '../../scripts/build/layout.mjs';
+import { framedHeight, framedWidth } from '../../src/ui/layout';
 
 const now = Date.UTC(2026, 8, 5, 3, 0, 0);
 const field = <T>(value: T) => ({
@@ -269,7 +270,7 @@ test('native views request their own widths and bottom dragging changes only hei
           .find((call) => call.command === 'resize')?.args.width;
       }),
     )
-    .toBe(380);
+    .toBe(framedWidth(380));
 
   await page.getByRole('button', { name: 'Settings' }).click();
   await expect
@@ -289,7 +290,7 @@ test('native views request their own widths and bottom dragging changes only hei
           .find((call) => call.command === 'resize')?.args.width;
       }),
     )
-    .toBe(400);
+    .toBe(framedWidth(400));
 
   await page.getByRole('button', { name: 'Close panel' }).click();
   const before = await page.evaluate(
@@ -338,6 +339,29 @@ test('native views request their own widths and bottom dragging changes only hei
   expect(nativeCalls).not.toContain('plugin:window|start_resize_dragging');
 });
 
+test('native cards use a custom shadow without a native frame', async ({ page }) => {
+  await mockNative(page);
+  await page.setViewportSize({ width: framedWidth(300), height: framedHeight(160) });
+  await page.reload({ waitUntil: 'networkidle' });
+
+  const layout = await page.evaluate(() => {
+    const card = document.querySelector('main')!;
+    const bounds = card.getBoundingClientRect();
+    return {
+      className: card.className,
+      shadow: getComputedStyle(card).boxShadow,
+      top: bounds.top,
+      left: bounds.left,
+      right: innerWidth - bounds.right,
+      bottomMargin: Number.parseFloat(getComputedStyle(card).marginBottom),
+    };
+  });
+  expect(layout.className).toContain('framed');
+  expect(layout.shadow).not.toBe('none');
+  expect(layout).toMatchObject({ top: 14, left: 20, right: 20 });
+  expect(layout.bottomMargin).toBe(26);
+});
+
 test('an expanded panel fills a window resized from its native edge', async ({
   page,
 }, testInfo) => {
@@ -351,7 +375,10 @@ test('an expanded panel fills a window resized from its native edge', async ({
   await expect
     .poll(() =>
       page.evaluate(
-        () => document.querySelector('main')!.getBoundingClientRect().height === innerHeight,
+        (frameHeight) =>
+          document.querySelector('main')!.getBoundingClientRect().height + frameHeight ===
+          innerHeight,
+        framedHeight(0),
       ),
     )
     .toBe(true);
@@ -364,7 +391,7 @@ test('an expanded panel fills a window resized from its native edge', async ({
       bottomGap: card.bottom - panel.bottom,
     };
   });
-  expect(layout.cardHeight).toBe(layout.viewportHeight);
+  expect(framedHeight(layout.cardHeight)).toBe(layout.viewportHeight);
   expect(layout.bottomGap).toBeLessThanOrEqual(8);
   await page.screenshot({
     path: `${buildLayout.testScreenshots}/resized-${testInfo.project.name}.png`,
