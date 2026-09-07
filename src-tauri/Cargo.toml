@@ -1,6 +1,6 @@
 [package]
 name = "codex-status"
-version = "0.2.4"
+version = "0.2.5"
 edition = "2024"
 rust-version = "1.98"
 description = "Read-only local session status window"

@@ -1,5 +1,5 @@
-export type Quality = 'fresh' | 'stale' | 'unavailable' | 'unsupported';
-export interface Field<T> {
+type Quality = 'fresh' | 'stale' | 'unavailable' | 'unsupported';
+interface Field<T> {
   value: T | null;
   source: string;
   observedAt: number | null;
@@ -14,7 +14,7 @@ export type Activity =
   | 'completed'
   | 'failed'
   | 'interrupted';
-export interface Usage {
+interface Usage {
   input: number | null;
   cachedInput: number | null;
   output: number | null;
@@ -40,7 +40,7 @@ export interface QuotaWindow {
   minutes: number | null;
   resetsAt: number | null;
 }
-export interface Quota {
+interface Quota {
   id: string;
   name: string;
   windows: QuotaWindow[];
@@ -59,9 +59,9 @@ export interface Snapshot {
   localError: string | null;
   refreshing: boolean;
 }
-export type ApprovalSound = 'off' | 'bell';
-export type CompletionSound = 'off' | 'ding' | 'bell';
-export type QuotaSound = 'off' | 'alert' | 'battery';
+type ApprovalSound = 'off' | 'bell';
+type CompletionSound = 'off' | 'ding' | 'bell';
+type QuotaSound = 'off' | 'alert' | 'battery';
 export interface Settings {
   roots: string[];
   executable: string;

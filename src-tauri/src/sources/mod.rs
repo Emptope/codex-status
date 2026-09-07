@@ -8,7 +8,7 @@ mod rpc;
 
 use crate::{
     settings::Settings,
-    status::{Quality, Snapshot},
+    status::{Quality, Quota, QuotaWindow, Snapshot},
 };
 use notify::{RecursiveMode, Watcher};
 use serde_json::Value;
@@ -164,19 +164,21 @@ impl RuntimeState {
         let owns_quota = self.quota_owner.as_ref().is_some_and(|owner| {
             owner.generation == generation && owner.source == QuotaSource::Local
         });
-        let changed = self.snapshot.sessions != sessions
-            || self.snapshot.local_error != local_error
-            || owns_quota
-                && (self.snapshot.quotas != quotas
-                    || observed_at.is_some() && self.snapshot.updated_at != observed_at);
-        if self.snapshot.sessions != sessions {
+        let sessions_changed = self.snapshot.sessions != sessions;
+        let local_error_changed = self.snapshot.local_error != local_error;
+        let quotas_changed = owns_quota && self.snapshot.quotas != quotas;
+        let observed_at_changed =
+            owns_quota && observed_at.is_some() && self.snapshot.updated_at != observed_at;
+        let changed =
+            sessions_changed || local_error_changed || quotas_changed || observed_at_changed;
+        if sessions_changed {
             self.snapshot.sessions = sessions;
         }
-        if self.snapshot.local_error != local_error {
+        if local_error_changed {
             self.snapshot.local_error = local_error;
         }
         if owns_quota {
-            if self.snapshot.quotas != quotas {
+            if quotas_changed {
                 self.snapshot.quotas = quotas;
             }
             if observed_at.is_some() {
@@ -198,11 +200,12 @@ impl RuntimeState {
         {
             return false;
         }
-        let changed = self.snapshot.quotas != quotas
+        let quotas_changed = self.snapshot.quotas != quotas;
+        let changed = quotas_changed
             || self.snapshot.connection != "connected"
             || self.snapshot.error.is_some()
             || self.snapshot.updated_at != Some(at);
-        if self.snapshot.quotas != quotas {
+        if quotas_changed {
             self.snapshot.quotas = quotas;
         }
         self.snapshot.connection = "connected".into();
@@ -269,6 +272,25 @@ fn local_quota_advanced(
         *previous = observed_at;
     }
     advanced && source == QuotaSource::Rpc
+}
+
+fn mark_quota_windows_stale(
+    quotas: &mut [Quota],
+    should_mark: impl Fn(&QuotaWindow) -> bool,
+) -> bool {
+    let mut changed = false;
+    for bucket in quotas {
+        for window in &mut bucket.windows {
+            if should_mark(window)
+                && window.remaining.value.is_some()
+                && window.remaining.quality != Quality::Stale
+            {
+                window.remaining.quality = Quality::Stale;
+                changed = true;
+            }
+        }
+    }
+    changed
 }
 
 fn identity(value: &str) -> String {
@@ -690,23 +712,12 @@ impl Runtime {
                 }
                 start_paused = !retry_source(&error);
                 self.publish_generation(generation, |state| {
+                    let quotas_changed = mark_quota_windows_stale(&mut state.quotas, |_| true);
                     let changed = state.connection != "offline"
                         || state.error.as_deref() != Some(error.as_str())
-                        || state.quotas.iter().any(|bucket| {
-                            bucket.windows.iter().any(|window| {
-                                window.remaining.value.is_some()
-                                    && window.remaining.quality != Quality::Stale
-                            })
-                        });
+                        || quotas_changed;
                     state.connection = "offline".into();
                     state.error = Some(error);
-                    for bucket in &mut state.quotas {
-                        for window in &mut bucket.windows {
-                            if window.remaining.value.is_some() {
-                                window.remaining.quality = Quality::Stale;
-                            }
-                        }
-                    }
                     changed
                 });
                 if let Some(rpc) = client.take() {
@@ -748,19 +759,9 @@ impl Runtime {
             }
             self.publish_generation(generation, |state| {
                 let now = chrono::Utc::now().timestamp_millis();
-                let mut changed = false;
-                for bucket in &mut state.quotas {
-                    for window in &mut bucket.windows {
-                        if window.resets_at.is_some_and(|at| at <= now)
-                            && window.remaining.value.is_some()
-                            && window.remaining.quality != Quality::Stale
-                        {
-                            window.remaining.quality = Quality::Stale;
-                            changed = true;
-                        }
-                    }
-                }
-                changed
+                mark_quota_windows_stale(&mut state.quotas, |window| {
+                    window.resets_at.is_some_and(|at| at <= now)
+                })
             });
         }
         if let Some(rpc) = client {

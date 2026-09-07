@@ -157,9 +157,6 @@
       clockTimer = window.setTimeout(scheduleClock, Math.min(delay, 2_147_483_647));
     }
   }
-  function followVisibility() {
-    scheduleClock();
-  }
   onMount(() => {
     let dispose = () => {};
     let stopped = false;
@@ -168,7 +165,7 @@
     const observer = new ResizeObserver(() => fitCard());
     observer.observe(content);
     window.addEventListener('resize', followWindow);
-    document.addEventListener('visibilitychange', followVisibility);
+    document.addEventListener('visibilitychange', scheduleClock);
     void (async () => {
       dispose = await subscribe(
         (next) => {
@@ -201,7 +198,7 @@
       dispose();
       observer.disconnect();
       window.removeEventListener('resize', followWindow);
-      document.removeEventListener('visibilitychange', followVisibility);
+      document.removeEventListener('visibilitychange', scheduleClock);
       if (clockTimer) clearTimeout(clockTimer);
       if (resizeFrame) cancelAnimationFrame(resizeFrame);
     };

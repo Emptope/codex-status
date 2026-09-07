@@ -10,7 +10,7 @@ export const activity: Record<Activity, string> = {
   failed: 'Failed',
   interrupted: 'Interrupted',
 };
-export const connection: Record<string, string> = {
+const connection: Record<string, string> = {
   connecting: 'Connecting',
   connected: 'Connected',
   offline: 'Offline',

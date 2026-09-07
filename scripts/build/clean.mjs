@@ -24,6 +24,13 @@ async function removeDirectory(directory, message) {
   if (canonical) await rm(canonical, { recursive: true, force: true });
 }
 
+async function prepareBuildDirectory(directory) {
+  const canonical = await canonicalDirectory(directory, 'Unsafe build directory');
+  if (canonical) return canonical;
+  await mkdir(directory, { recursive: true });
+  return canonicalDirectory(directory, 'Unsafe build directory');
+}
+
 async function artifactFilesOnly(directory) {
   const entries = await readdir(directory, { withFileTypes: true }).catch((error) => {
     if (error.code === 'ENOENT') return [];
@@ -38,11 +45,7 @@ async function artifactFilesOnly(directory) {
 
 export async function cleanOutputs(directory, { preserveArtifacts = false } = {}) {
   const requested = directory;
-  directory = await canonicalDirectory(directory, 'Unsafe build directory');
-  if (!directory) {
-    await mkdir(requested, { recursive: true });
-    directory = await canonicalDirectory(requested, 'Unsafe build directory');
-  }
+  directory = await prepareBuildDirectory(directory);
   for (const name of [
     'staging',
     'test',
@@ -76,11 +79,7 @@ export async function cleanOutputs(directory, { preserveArtifacts = false } = {}
 
 export async function cleanCaches(directory) {
   const requested = directory;
-  directory = await canonicalDirectory(directory, 'Unsafe build directory');
-  if (!directory) {
-    await mkdir(requested, { recursive: true });
-    directory = await canonicalDirectory(requested, 'Unsafe build directory');
-  }
+  directory = await prepareBuildDirectory(directory);
   await removeDirectory(join(directory, 'cache'), 'Unsafe build cache');
   for (const name of ['cargo', 'vite-cache']) {
     await removeDirectory(join(directory, name), 'Unsafe legacy build cache');

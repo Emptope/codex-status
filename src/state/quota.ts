@@ -1,4 +1,4 @@
-export type QuotaLevel = 'low' | 'medium' | 'high';
+type QuotaLevel = 'low' | 'medium' | 'high';
 
 export function quotaLevel(remaining: number | null): QuotaLevel | null {
   if (remaining === null) return null;
