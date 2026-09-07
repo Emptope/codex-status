@@ -473,15 +473,24 @@ test('settings controls align without text overlap', async ({ page }, testInfo) 
       return { labelRight: label.right, controlLeft: control.left, controlRight: control.right };
     });
     const rights = rows.map((row) => row.controlRight);
+    const scrollView = document.querySelector('.scroll-view')!;
+    const scrollBounds = scrollView.getBoundingClientRect();
+    const checkboxRights = [
+      ...document.querySelectorAll<HTMLInputElement>("input[type='checkbox']"),
+    ].map((checkbox) => checkbox.getBoundingClientRect().right);
     return {
       overflow: document.documentElement.scrollWidth - innerWidth,
       rightDrift: Math.max(...rights) - Math.min(...rights),
       overlaps: rows.filter((row) => row.labelRight > row.controlLeft).length,
+      checkboxRightClearance: scrollBounds.right - Math.max(...checkboxRights),
+      scrollPaddingRight: Number.parseFloat(getComputedStyle(scrollView).paddingRight),
     };
   });
   expect(layout.overflow).toBeLessThanOrEqual(0);
   expect(layout.rightDrift).toBeLessThanOrEqual(1);
   expect(layout.overlaps).toBe(0);
+  expect(layout.checkboxRightClearance).toBeGreaterThanOrEqual(14);
+  expect(layout.scrollPaddingRight).toBe(14);
   await page.screenshot({
     path: `${buildLayout.testScreenshots}/settings-${testInfo.project.name}.png`,
     fullPage: true,

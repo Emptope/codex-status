@@ -41,6 +41,12 @@ Verify the checksum before use. Run the Windows `.exe` directly, open the macOS 
 sudo apt install ./codex-status-vX.Y.Z-linux-x64.deb
 ```
 
+Automatic macOS releases are currently unsigned. After verifying the checksum and moving the app to Applications, if macOS blocks it, remove the quarantine attribute:
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/Codex Status.app"
+```
+
 ## Develop
 
 Requirements: Node.js 24 (`>=24.19 <25`), pnpm 11.25, Rust 1.98, and the [Tauri 2 platform prerequisites](https://v2.tauri.app/start/prerequisites/).

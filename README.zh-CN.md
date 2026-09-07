@@ -41,6 +41,12 @@ Codex Status 显示本地会话、上下文用量、账户额度和状态通知�
 sudo apt install ./codex-status-vX.Y.Z-linux-x64.deb
 ```
 
+macOS 自动发布的产物目前未签名。校验 SHA-256 并将应用移入“应用程序”后，如果 macOS 阻止运行，可移除应用的隔离属性：
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/Codex Status.app"
+```
+
 ## 开发
 
 需要 Node.js 24（`>=24.19 <25`）、pnpm 11.25、Rust 1.98 和 [Tauri 2 平台依赖](https://v2.tauri.app/start/prerequisites/)。

@@ -324,7 +324,7 @@
           }}><X size={16} /></button
         >
       </div>
-      <div class="scroll-view" data-no-drag>
+      <div class="scroll-view" class:settings-view={view === 'settings'} data-no-drag>
         {#if view === 'details'}<Details {session} />
         {:else if view === 'settings'}<Preferences {settings} {apply} />
         {:else}

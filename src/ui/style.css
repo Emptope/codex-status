@@ -405,6 +405,10 @@ footer {
   cursor: auto;
 }
 
+.scroll-view.settings-view {
+  padding-right: 14px;
+}
+
 .panel .scroll-view {
   flex: 1 1 auto;
   min-height: 0;
